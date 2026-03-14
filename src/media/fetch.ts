@@ -36,6 +36,7 @@ type FetchMediaOptions = {
   ssrfPolicy?: SsrFPolicy;
   lookupFn?: LookupFn;
   dispatcherPolicy?: PinnedDispatcherPolicy;
+  pinDns?: boolean;
 };
 
 function stripQuotes(value: string): string {
@@ -94,6 +95,7 @@ export async function fetchRemoteMedia(options: FetchMediaOptions): Promise<Fetc
     ssrfPolicy,
     lookupFn,
     dispatcherPolicy,
+    pinDns,
   } = options;
 
   let res: Response;
@@ -109,6 +111,7 @@ export async function fetchRemoteMedia(options: FetchMediaOptions): Promise<Fetc
         policy: ssrfPolicy,
         lookupFn,
         dispatcherPolicy,
+        pinDns,
       }),
     );
     res = result.response;

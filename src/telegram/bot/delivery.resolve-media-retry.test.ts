@@ -327,6 +327,39 @@ describe("resolveMedia getFile retry", () => {
     );
   });
 
+  it("uses transport.fetch without pinned-dispatcher override for file downloads", async () => {
+    const getFile = vi.fn().mockResolvedValue({ file_path: "photos/fallback.jpg" });
+    const callerFetch = vi.fn() as unknown as typeof fetch;
+    const callerTransport = { fetch: callerFetch, sourceFetch: callerFetch };
+    fetchRemoteMedia.mockResolvedValueOnce({
+      buffer: Buffer.from("jpg-data"),
+      contentType: "image/jpeg",
+      fileName: "fallback.jpg",
+    });
+    saveMediaBuffer.mockResolvedValueOnce({
+      path: "/tmp/fallback---uuid.jpg",
+      contentType: "image/jpeg",
+    });
+
+    const result = await resolveMedia(
+      makeCtx("photo", getFile),
+      MAX_MEDIA_BYTES,
+      BOT_TOKEN,
+      callerTransport,
+    );
+
+    expect(result).not.toBeNull();
+    expect(fetchRemoteMedia).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fetchImpl: callerFetch,
+        pinDns: false,
+      }),
+    );
+    const call = fetchRemoteMedia.mock.calls.at(-1)?.[0];
+    expect(call).toBeDefined();
+    expect(call).not.toHaveProperty("dispatcherPolicy");
+  });
+
   it("uses caller-provided fetch impl for sticker downloads", async () => {
     const getFile = vi.fn().mockResolvedValue({ file_path: "stickers/file_0.webp" });
     const callerFetch = vi.fn() as unknown as typeof fetch;
