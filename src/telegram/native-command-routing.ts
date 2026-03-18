@@ -29,12 +29,12 @@ export function extractTelegramNativeCommandToken(params: {
   text?: string | null;
   botUsername?: string | null;
 }): string | null {
-  const trimmed = params.text?.trim();
-  if (!trimmed || !trimmed.startsWith("/")) {
+  const text = params.text ?? "";
+  if (!text.startsWith("/")) {
     return null;
   }
 
-  const commandName = trimmed.match(/^\/([^\s]+)/)?.[1]?.trim();
+  const commandName = text.match(/^\/([^\s]+)/)?.[1]?.trim();
   if (!commandName) {
     return null;
   }
