@@ -327,10 +327,15 @@ describe("resolveMedia getFile retry", () => {
     );
   });
 
-  it("uses transport.fetch without pinned-dispatcher override for file downloads", async () => {
+  it("keeps pinned-dispatcher policy on the guarded file-download path", async () => {
     const getFile = vi.fn().mockResolvedValue({ file_path: "photos/fallback.jpg" });
     const callerFetch = vi.fn() as unknown as typeof fetch;
-    const callerTransport = { fetch: callerFetch, sourceFetch: callerFetch };
+    const callerSourceFetch = vi.fn() as unknown as typeof fetch;
+    const callerTransport = {
+      fetch: callerFetch,
+      sourceFetch: callerSourceFetch,
+      pinnedDispatcherPolicy: { mode: "direct" as const, connect: { localAddress: "0.0.0.0" } },
+    };
     fetchRemoteMedia.mockResolvedValueOnce({
       buffer: Buffer.from("jpg-data"),
       contentType: "image/jpeg",
@@ -351,13 +356,13 @@ describe("resolveMedia getFile retry", () => {
     expect(result).not.toBeNull();
     expect(fetchRemoteMedia).toHaveBeenCalledWith(
       expect.objectContaining({
-        fetchImpl: callerFetch,
-        pinDns: false,
+        fetchImpl: callerSourceFetch,
+        dispatcherPolicy: callerTransport.pinnedDispatcherPolicy,
       }),
     );
     const call = fetchRemoteMedia.mock.calls.at(-1)?.[0];
     expect(call).toBeDefined();
-    expect(call).not.toHaveProperty("dispatcherPolicy");
+    expect(call).not.toHaveProperty("pinDns");
   });
 
   it("uses caller-provided fetch impl for sticker downloads", async () => {
