@@ -1538,7 +1538,7 @@ export const registerTelegramHandlers = ({
       // the generic DM fallback before shouldSkipUpdate only for that path.
       if (event.allowNativeSkillBypass) {
         const nativeCommandToken = extractTelegramNativeCommandToken({
-          text: event.msg.text ?? event.msg.caption,
+          text: event.msg.text,
           botUsername: event.ctx.me?.username,
         });
         if (nativeCommandToken && nativeSkillCommandNames.has(nativeCommandToken)) {
