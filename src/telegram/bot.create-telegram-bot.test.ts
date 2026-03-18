@@ -1199,7 +1199,7 @@ describe("createTelegramBot", () => {
 
     loadConfig.mockReturnValue({
       messages: {
-        ackReaction: "馃憖",
+        ackReaction: "👀",
         ackReactionScope: "group-mentions",
         groupChat: { mentionPatterns: ["\\bbert\\b"] },
       },
@@ -1221,7 +1221,7 @@ describe("createTelegramBot", () => {
       },
     });
 
-    expect(setMessageReactionSpy).toHaveBeenCalledWith(7, 123, [{ type: "emoji", emoji: "馃憖" }]);
+    expect(setMessageReactionSpy).toHaveBeenCalledWith(7, 123, [{ type: "emoji", emoji: "👀" }]);
   });
   it("clears native commands when disabled", () => {
     resetHarnessSpies();
@@ -2200,7 +2200,7 @@ describe("createTelegramBot", () => {
 
       expect(sendMessageSpy).toHaveBeenCalledWith(
         1234,
-        "鈿狅笍 Failed to download media. Please try again.",
+        "⚠️ Failed to download media. Please try again.",
         { reply_to_message_id: 411 },
       );
       expect(replySpy).not.toHaveBeenCalled();
