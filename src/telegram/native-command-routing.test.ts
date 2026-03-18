@@ -28,4 +28,19 @@ describe("extractTelegramNativeCommandToken", () => {
       }),
     ).toBe("skill@otherbot");
   });
+
+  it("rejects commands that only become slash-prefixed after trimming leading whitespace", () => {
+    expect(
+      extractTelegramNativeCommandToken({
+        text: "  /skill demo_skill hello",
+        botUsername: "openclaw_bot",
+      }),
+    ).toBeNull();
+    expect(
+      extractTelegramNativeCommandToken({
+        text: "\n/demo_skill hello",
+        botUsername: "openclaw_bot",
+      }),
+    ).toBeNull();
+  });
 });
