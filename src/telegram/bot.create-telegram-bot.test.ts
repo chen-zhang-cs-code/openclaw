@@ -1199,7 +1199,7 @@ describe("createTelegramBot", () => {
 
     loadConfig.mockReturnValue({
       messages: {
-        ackReaction: "👀",
+        ackReaction: "馃憖",
         ackReactionScope: "group-mentions",
         groupChat: { mentionPatterns: ["\\bbert\\b"] },
       },
@@ -1221,7 +1221,7 @@ describe("createTelegramBot", () => {
       },
     });
 
-    expect(setMessageReactionSpy).toHaveBeenCalledWith(7, 123, [{ type: "emoji", emoji: "👀" }]);
+    expect(setMessageReactionSpy).toHaveBeenCalledWith(7, 123, [{ type: "emoji", emoji: "馃憖" }]);
   });
   it("clears native commands when disabled", () => {
     resetHarnessSpies();
@@ -1903,6 +1903,51 @@ describe("createTelegramBot", () => {
 
     expect(replySpy).not.toHaveBeenCalled();
   });
+  it("keeps channel_post native skill commands on the generic path", async () => {
+    replySpy.mockClear();
+    listSkillCommandsForAgents.mockReturnValue([
+      {
+        name: "demo_skill",
+        skillName: "demo-skill",
+        description: "Demo skill",
+      },
+    ]);
+
+    loadConfig.mockReturnValue({
+      commands: { native: true, nativeSkills: true, text: true },
+      channels: {
+        telegram: {
+          groupPolicy: "open",
+          groups: {
+            "-100777111222": {
+              enabled: true,
+              requireMention: false,
+            },
+          },
+        },
+      },
+    });
+
+    createTelegramBot({ token: "tok" });
+    const handler = getOnHandler("channel_post") as (
+      ctx: Record<string, unknown>,
+    ) => Promise<void>;
+
+    await handler({
+      channelPost: {
+        chat: { id: -100777111222, type: "channel", title: "Wake Channel" },
+        text: "/demo_skill hello",
+        date: 1736380800,
+        message_id: 321,
+      },
+      me: { username: "openclaw_bot" },
+      getFile: async () => ({ download: async () => new Uint8Array() }),
+    });
+
+    expect(replySpy).toHaveBeenCalledTimes(1);
+    const payload = replySpy.mock.calls[0]?.[0] as { Body?: string };
+    expect(payload.Body).toContain("/demo_skill hello");
+  });
   it("skips tool summaries for native slash commands", async () => {
     commandSpy.mockClear();
     replySpy.mockImplementation(async (_ctx, opts) => {
@@ -2155,7 +2200,7 @@ describe("createTelegramBot", () => {
 
       expect(sendMessageSpy).toHaveBeenCalledWith(
         1234,
-        "⚠️ Failed to download media. Please try again.",
+        "鈿狅笍 Failed to download media. Please try again.",
         { reply_to_message_id: 411 },
       );
       expect(replySpy).not.toHaveBeenCalled();
