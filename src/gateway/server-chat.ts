@@ -845,8 +845,9 @@ export function createAgentEventHandler({
       chatRunState.abortedRuns.has(clientRunId) || chatRunState.abortedRuns.has(evt.runId);
     // Include sessionKey so Control UI can filter tool streams per session.
     const agentPayload = sessionKey ? { ...eventForClients, sessionKey } : eventForClients;
+    const hasSeenRun = agentRunSeq.has(evt.runId);
     const last = agentRunSeq.get(evt.runId) ?? 0;
-    if (sessionKey && lifecyclePhase === "start") {
+    if (sessionKey && (lifecyclePhase === "start" || !hasSeenRun)) {
       sessionLatestRuns.set(sessionKey, evt.runId);
     }
     if (lifecyclePhase !== "error" && evt.seq > last) {

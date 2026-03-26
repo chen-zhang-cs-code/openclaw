@@ -478,6 +478,80 @@ describe("agent event handler", () => {
     expect(chatRunState.registry.peek("run-old-complete")).toBeUndefined();
   });
 
+  it("ignores deferred lifecycle errors after a newer run finishes without lifecycle start", async () => {
+    vi.useFakeTimers();
+    const { broadcast, broadcastToConnIds, chatRunState, handler, sessionEventSubscribers } =
+      createHarness({
+        resolveSessionKeyForRun: (runId) =>
+          runId === "run-old-no-start" || runId === "run-new-no-start"
+            ? "session-no-start"
+            : undefined,
+      });
+    sessionEventSubscribers.subscribe("conn-session");
+    chatRunState.registry.add("run-old-no-start", {
+      sessionKey: "session-no-start",
+      clientRunId: "client-old-no-start",
+    });
+    chatRunState.registry.add("run-new-no-start", {
+      sessionKey: "session-no-start",
+      clientRunId: "client-new-no-start",
+    });
+
+    handler({
+      runId: "run-old-no-start",
+      seq: 1,
+      stream: "lifecycle",
+      ts: 1_000,
+      data: { phase: "start", startedAt: 1_000 },
+    });
+    emitLifecycleError(handler, "run-old-no-start", "temporary fallback", 2);
+    handler({
+      runId: "run-new-no-start",
+      seq: 1,
+      stream: "assistant",
+      ts: 2_000,
+      data: { text: "Recovered without lifecycle start" },
+    });
+    emitLifecycleEnd(handler, "run-new-no-start", 2);
+
+    broadcastToConnIds.mockClear();
+    persistGatewaySessionLifecycleEventMock.mockClear();
+
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    const oldRunErrorPayloads = chatBroadcastCalls(broadcast).filter(([, payload]) => {
+      const typed = payload as { state?: string; runId?: string };
+      return typed.state === "error" && typed.runId === "client-old-no-start";
+    });
+    expect(oldRunErrorPayloads).toHaveLength(0);
+
+    const sessionErrorCalls = broadcastToConnIds.mock.calls.filter(([event, payload]) => {
+      const typed = payload as { phase?: string; runId?: string };
+      return (
+        event === "sessions.changed" &&
+        typed.phase === "error" &&
+        typed.runId === "run-old-no-start"
+      );
+    });
+    expect(sessionErrorCalls).toHaveLength(0);
+
+    const persistedErrorCalls = persistGatewaySessionLifecycleEventMock.mock.calls.filter(
+      ([params]) => {
+        const typed = params as {
+          sessionKey?: string;
+          event?: { runId?: string; data?: { phase?: string } };
+        };
+        return (
+          typed.sessionKey === "session-no-start" &&
+          typed.event?.runId === "run-old-no-start" &&
+          typed.event?.data?.phase === "error"
+        );
+      },
+    );
+    expect(persistedErrorCalls).toHaveLength(0);
+    expect(chatRunState.registry.peek("run-old-no-start")).toBeUndefined();
+  });
+
   it("strips inline directives from assistant chat events", () => {
     const { broadcast, nodeSendToSession, nowSpy } = emitRun1AssistantText(
       createHarness({ now: 1_000 }),
