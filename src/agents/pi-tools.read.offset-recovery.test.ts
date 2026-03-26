@@ -171,9 +171,7 @@ describe("createOpenClawReadTool offset recovery", () => {
       }),
     ).rejects.toThrow("permission changed during recovery");
 
-    expect(execute.mock.calls.map(([, args]) => (args as Record<string, unknown>).offset)).toEqual([
-      200, 5,
-    ]);
+    expect(execute.mock.calls.map(([, args]) => args.offset)).toEqual([200, 5]);
   });
 
   it("continues adaptive paging from the recovered offset window", async () => {
@@ -211,9 +209,7 @@ describe("createOpenClawReadTool offset recovery", () => {
       offset: 10_000,
     });
 
-    expect(
-      execute.mock.calls.map(([, args]) => (args as Record<string, unknown>).offset ?? 1),
-    ).toEqual([10_000, 501, 601]);
+    expect(execute.mock.calls.map(([, args]) => args.offset ?? 1)).toEqual([10_000, 501, 601]);
     const text = extractToolText(result);
     expect(text).toContain("Requested offset 10000 is beyond end of file (2500 lines total)");
     expect(text).toContain("tail-a");
