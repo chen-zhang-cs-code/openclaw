@@ -1,8 +1,10 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { createSandboxedReadTool } from "./pi-tools.read.js";
+import type { AgentToolResult } from "@mariozechner/pi-agent-core";
+import { Type } from "@sinclair/typebox";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createOpenClawReadTool, createSandboxedReadTool } from "./pi-tools.read.js";
 import { createHostSandboxFsBridge } from "./test-helpers/host-sandbox-fs-bridge.js";
 
 function extractToolText(result: unknown): string {
@@ -33,6 +35,36 @@ async function createReadFixture(lines: string[]) {
   return createSandboxedReadTool({
     root,
     bridge: createHostSandboxFsBridge(root),
+  });
+}
+
+function createStubReadResult(
+  text: string,
+  details?: Record<string, unknown>,
+): AgentToolResult<unknown> {
+  return {
+    content: [{ type: "text", text }],
+    ...(details ? { details } : {}),
+  } as AgentToolResult<unknown>;
+}
+
+function createWrappedReadTool(
+  execute: (
+    toolCallId: string,
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+  ) => Promise<AgentToolResult<unknown>>,
+) {
+  return createOpenClawReadTool({
+    name: "read",
+    label: "read",
+    description: "test read tool",
+    parameters: Type.Object({
+      path: Type.String(),
+      offset: Type.Optional(Type.Number()),
+      limit: Type.Optional(Type.Number()),
+    }),
+    execute,
   });
 }
 
@@ -104,12 +136,91 @@ describe("createOpenClawReadTool offset recovery", () => {
             offsetRecovery?: Record<string, unknown>;
           };
         }
-      ).details?.offsetRecovery,
+    ).details?.offsetRecovery,
     ).toMatchObject({
       code: "offset_out_of_range",
       requestedOffset: 200,
       totalLines: 6,
       recoveredOffset: 5,
     });
+  });
+
+  it("rethrows non-range failures after a recovery retry", async () => {
+    const permissionError = new Error("permission changed during recovery");
+    const execute = vi.fn(
+      async (
+        _toolCallId: string,
+        args: Record<string, unknown>,
+      ): Promise<AgentToolResult<unknown>> => {
+        if (args.offset === 200) {
+          throw new Error("Offset 200 is beyond end of file (6 lines total)");
+        }
+        if (args.offset === 5) {
+          throw permissionError;
+        }
+        throw new Error(`unexpected offset ${String(args.offset)}`);
+      },
+    );
+    const readTool = createWrappedReadTool(execute);
+
+    await expect(
+      readTool.execute("read-offset-recovery-rethrow", {
+        path: "sample.txt",
+        offset: 200,
+        limit: 2,
+      }),
+    ).rejects.toThrow("permission changed during recovery");
+
+    expect(execute.mock.calls.map(([, args]) => (args as Record<string, unknown>).offset)).toEqual([
+      200,
+      5,
+    ]);
+  });
+
+  it("continues adaptive paging from the recovered offset window", async () => {
+    const execute = vi.fn(
+      async (
+        _toolCallId: string,
+        args: Record<string, unknown>,
+      ): Promise<AgentToolResult<unknown>> => {
+        const offset = typeof args.offset === "number" ? args.offset : 1;
+        if (offset === 10_000) {
+          throw new Error("Offset 10000 is beyond end of file (2500 lines total)");
+        }
+        if (offset === 501) {
+          return createStubReadResult(
+            "tail-a\n\n[2399 more lines in file. Use offset=601 to continue.]",
+            {
+              truncation: {
+                truncated: true,
+                outputLines: 100,
+                firstLineExceedsLimit: false,
+              },
+            },
+          );
+        }
+        if (offset === 601) {
+          return createStubReadResult("tail-b");
+        }
+        throw new Error(`unexpected offset ${offset}`);
+      },
+    );
+    const readTool = createWrappedReadTool(execute);
+
+    const result = await readTool.execute("read-offset-recovery-adaptive", {
+      path: "sample.txt",
+      offset: 10_000,
+    });
+
+    expect(execute.mock.calls.map(([, args]) => (args as Record<string, unknown>).offset ?? 1)).toEqual([
+      10_000,
+      501,
+      601,
+    ]);
+    const text = extractToolText(result);
+    expect(text).toContain("Requested offset 10000 is beyond end of file (2500 lines total)");
+    expect(text).toContain("tail-a");
+    expect(text).toContain("tail-b");
+    expect(text).not.toContain("Use offset=601 to continue.");
   });
 });

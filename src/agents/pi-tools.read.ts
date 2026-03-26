@@ -299,6 +299,41 @@ function createReadOffsetDiagnosticResult(
   };
 }
 
+function extractReadOffsetRecoveryDetails(
+  result: AgentToolResult<unknown>,
+): ReadOffsetRecoveryDetails | null {
+  const details = (result as { details?: unknown }).details;
+  if (!details || typeof details !== "object") {
+    return null;
+  }
+  const recovery = (details as { offsetRecovery?: unknown }).offsetRecovery;
+  if (!recovery || typeof recovery !== "object") {
+    return null;
+  }
+  const record = recovery as Record<string, unknown>;
+  if (record.code !== "offset_out_of_range") {
+    return null;
+  }
+  const requestedOffset = record.requestedOffset;
+  const totalLines = record.totalLines;
+  const recoveredOffset = record.recoveredOffset;
+  if (
+    typeof requestedOffset !== "number" ||
+    !Number.isFinite(requestedOffset) ||
+    typeof totalLines !== "number" ||
+    !Number.isFinite(totalLines) ||
+    typeof recoveredOffset !== "number" ||
+    !Number.isFinite(recoveredOffset)
+  ) {
+    return null;
+  }
+  return {
+    requestedOffset: Math.floor(requestedOffset),
+    totalLines: Math.max(0, Math.floor(totalLines)),
+    recoveredOffset: Math.max(1, Math.floor(recoveredOffset)),
+  };
+}
+
 async function executeReadPageWithRecovery(params: {
   base: AnyAgentTool;
   toolCallId: string;
@@ -324,8 +359,15 @@ async function executeReadPageWithRecovery(params: {
         ...diagnostic,
         recoveredOffset,
       });
-    } catch {
-      return createReadOffsetDiagnosticResult(diagnostic);
+    } catch (retryError) {
+      const retryDiagnostic = parseReadOffsetOutOfRangeError(retryError);
+      if (!retryDiagnostic) {
+        throw retryError;
+      }
+      return createReadOffsetDiagnosticResult({
+        requestedOffset: diagnostic.requestedOffset,
+        totalLines: retryDiagnostic.totalLines,
+      });
     }
   }
 }
@@ -375,6 +417,8 @@ async function executeReadWithAdaptivePaging(params: {
       return pageResult;
     }
 
+    const recovery = extractReadOffsetRecoveryDetails(pageResult);
+    const pageStartOffset = recovery?.recoveredOffset ?? nextOffset;
     const truncation = extractReadTruncationDetails(pageResult);
     const canContinue =
       Boolean(truncation?.truncated) &&
@@ -387,7 +431,7 @@ async function executeReadWithAdaptivePaging(params: {
 
     if (aggregatedText && aggregatedBytes + nextBytes > params.maxBytes) {
       capped = true;
-      continuationOffset = nextOffset;
+      continuationOffset = pageStartOffset;
       break;
     }
 
@@ -398,7 +442,7 @@ async function executeReadWithAdaptivePaging(params: {
       return withToolResultText(pageResult, aggregatedText);
     }
 
-    nextOffset += truncation.outputLines;
+    nextOffset = pageStartOffset + truncation.outputLines;
     continuationOffset = nextOffset;
 
     if (aggregatedBytes >= params.maxBytes) {
