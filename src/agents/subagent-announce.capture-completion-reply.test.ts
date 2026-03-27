@@ -124,6 +124,54 @@ describe("captureSubagentCompletionReply", () => {
     vi.useRealTimers();
   });
 
+  it("does not reuse stale assistant output after later mixed tool-call progress", async () => {
+    vi.useFakeTimers();
+    chatHistoryMock.mockResolvedValue({
+      messages: [
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "Initial analysis complete." }],
+        },
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "Let me also verify..." },
+            { type: "toolCall", id: "call-1", name: "read", arguments: {} },
+          ],
+        },
+      ],
+    });
+
+    const pending = captureSubagentCompletionReply("agent:main:subagent:child");
+    await vi.runAllTimersAsync();
+    const result = await pending;
+
+    expect(result).toBeUndefined();
+    vi.useRealTimers();
+  });
+
+  it("treats normalized tool_call blocks as mixed turns", async () => {
+    vi.useFakeTimers();
+    chatHistoryMock.mockResolvedValue({
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "Reading the remaining files." },
+            { type: "tool_call", id: "call-1", name: "read", input: {} },
+          ],
+        },
+      ],
+    });
+
+    const pending = captureSubagentCompletionReply("agent:main:subagent:child");
+    await vi.runAllTimersAsync();
+    const result = await pending;
+
+    expect(result).toBeUndefined();
+    vi.useRealTimers();
+  });
+
   it("keeps explicit <final> content from mixed assistant + tool-call turns", async () => {
     chatHistoryMock.mockResolvedValueOnce({
       messages: [

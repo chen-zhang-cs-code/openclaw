@@ -1,4 +1,5 @@
 import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
+import { isToolCallContentType } from "../chat/tool-content.js";
 import { loadConfig } from "../config/config.js";
 import {
   loadSessionStore,
@@ -161,12 +162,11 @@ function countAssistantToolCalls(content: unknown): number {
       continue;
     }
     const type = (block as { type?: unknown }).type;
+    const normalizedType = typeof type === "string" ? type.toLowerCase() : "";
     if (
-      type === "toolCall" ||
-      type === "tool_use" ||
-      type === "toolUse" ||
-      type === "functionCall" ||
-      type === "function_call"
+      isToolCallContentType(type) ||
+      normalizedType === "functioncall" ||
+      normalizedType === "function_call"
     ) {
       count += 1;
     }
@@ -187,6 +187,12 @@ function summarizeSubagentOutputHistory(messages: Array<unknown>): SubagentOutpu
     if (role === "assistant") {
       const toolCallCount = countAssistantToolCalls((message as { content?: unknown }).content);
       snapshot.toolCallCount += toolCallCount;
+      const explicitFinalText =
+        toolCallCount > 0 ? extractExplicitFinalAssistantText(message)?.trim() : undefined;
+      if (toolCallCount > 0) {
+        // Mixed assistant/tool-call turns should not carry forward stale prior assistant text.
+        snapshot.latestAssistantText = explicitFinalText;
+      }
       const text = extractSubagentOutputText(message).trim();
       if (!text) {
         continue;
@@ -200,11 +206,8 @@ function summarizeSubagentOutputHistory(messages: Array<unknown>): SubagentOutpu
       snapshot.latestSilentText = undefined;
       if (toolCallCount === 0) {
         snapshot.latestAssistantText = text;
-      } else {
-        const explicitFinalText = extractExplicitFinalAssistantText(message)?.trim();
-        if (explicitFinalText) {
-          snapshot.latestAssistantText = explicitFinalText;
-        }
+      } else if (explicitFinalText) {
+        snapshot.latestAssistantText = explicitFinalText;
       }
       snapshot.assistantFragments.push(text);
       continue;
