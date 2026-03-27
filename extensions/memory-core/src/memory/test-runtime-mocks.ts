@@ -1,4 +1,4 @@
-import { vi } from "vitest";
+import { beforeEach, vi } from "vitest";
 
 // Unit tests: avoid importing the real chokidar implementation (native fsevents, etc.).
 vi.mock("chokidar", () => ({
@@ -11,3 +11,12 @@ vi.mock("chokidar", () => ({
 vi.mock("./sqlite-vec.js", () => ({
   loadSqliteVecExtension: async () => ({ ok: false, error: "sqlite-vec disabled in tests" }),
 }));
+
+beforeEach(async () => {
+  const { clearMemoryEmbeddingProviders, registerMemoryEmbeddingProvider } = await import(
+    "../../../../src/plugins/memory-embedding-providers.js"
+  );
+  const { registerBuiltInMemoryEmbeddingProviders } = await import("./provider-adapters.js");
+  clearMemoryEmbeddingProviders();
+  registerBuiltInMemoryEmbeddingProviders({ registerMemoryEmbeddingProvider });
+});
