@@ -21,7 +21,7 @@ import { isCanonicalDottedDecimalIPv4, isLoopbackIpAddress } from "../shared/net
 import { isRecord } from "../utils.js";
 import { findDuplicateAgentDirs, formatDuplicateAgentDirError } from "./agent-dirs.js";
 import { appendAllowedValuesHint, summarizeAllowedValues } from "./allowed-values.js";
-import { BUNDLED_CHANNEL_CONFIG_METADATA } from "./bundled-channel-config-metadata.js";
+import { getBundledChannelConfigSchemaMap } from "./bundled-channel-config-runtime.js";
 import { collectChannelSchemaMetadata } from "./channel-config-metadata.js";
 import { applyAgentDefaults, applyModelDefaults, applySessionDefaults } from "./defaults.js";
 import {
@@ -35,26 +35,15 @@ import { OpenClawSchema } from "./zod-schema.js";
 const LEGACY_REMOVED_PLUGIN_IDS = new Set(["google-antigravity-auth", "google-gemini-cli-auth"]);
 
 type UnknownIssueRecord = Record<string, unknown>;
-type JsonSchemaRecord = Record<string, unknown> & {
-  type?: string | string[];
-  properties?: Record<string, JsonSchemaRecord>;
-  additionalProperties?: JsonSchemaRecord | boolean;
-  items?: JsonSchemaRecord | JsonSchemaRecord[];
-  anyOf?: JsonSchemaRecord[];
-  allOf?: JsonSchemaRecord[];
-  oneOf?: JsonSchemaRecord[];
-  enum?: unknown[];
-  const?: unknown;
-};
+type ConfigPathSegment = string | number;
 type AllowedValuesCollection = {
   values: unknown[];
   incomplete: boolean;
   hasValues: boolean;
 };
+type JsonSchemaNode = Record<string, unknown>;
 
-const bundledChannelSchemaById = new Map<string, Record<string, unknown>>(
-  BUNDLED_CHANNEL_CONFIG_METADATA.map((entry) => [entry.channelId, entry.schema]),
-);
+const CUSTOM_EXPECTED_ONE_OF_RE = /expected one of ((?:"[^"]+"(?:\|"?[^"]+"?)*)+)/i;
 
 function toIssueRecord(value: unknown): UnknownIssueRecord | null {
   if (!value || typeof value !== "object") {
@@ -63,11 +52,160 @@ function toIssueRecord(value: unknown): UnknownIssueRecord | null {
   return value as UnknownIssueRecord;
 }
 
-function toJsonSchemaRecord(value: unknown): JsonSchemaRecord | null {
+function toConfigPathSegments(path: unknown): ConfigPathSegment[] {
+  if (!Array.isArray(path)) {
+    return [];
+  }
+  return path.filter((segment): segment is ConfigPathSegment => {
+    const segmentType = typeof segment;
+    return segmentType === "string" || segmentType === "number";
+  });
+}
+
+function formatConfigPath(segments: readonly ConfigPathSegment[]): string {
+  return segments.join(".");
+}
+
+function toJsonSchemaNode(value: unknown): JsonSchemaNode | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
   }
-  return value as JsonSchemaRecord;
+  return value as JsonSchemaNode;
+}
+
+function getSchemaCombinatorBranches(node: JsonSchemaNode): JsonSchemaNode[] {
+  const keys = ["anyOf", "oneOf", "allOf"] as const;
+  const branches: JsonSchemaNode[] = [];
+  for (const key of keys) {
+    const value = node[key];
+    if (!Array.isArray(value)) {
+      continue;
+    }
+    for (const entry of value) {
+      const child = toJsonSchemaNode(entry);
+      if (child) {
+        branches.push(child);
+      }
+    }
+  }
+  return branches;
+}
+
+function collectAllowedValuesFromSchemaNode(node: JsonSchemaNode): AllowedValuesCollection {
+  if (Object.prototype.hasOwnProperty.call(node, "const")) {
+    return { values: [node.const], incomplete: false, hasValues: true };
+  }
+
+  const enumValues = node.enum;
+  if (Array.isArray(enumValues)) {
+    return { values: enumValues, incomplete: false, hasValues: enumValues.length > 0 };
+  }
+
+  if (node.type === "boolean") {
+    return { values: [true, false], incomplete: false, hasValues: true };
+  }
+  if (Array.isArray(node.type) && node.type.includes("boolean")) {
+    return node.type.length === 1
+      ? { values: [true, false], incomplete: false, hasValues: true }
+      : { values: [], incomplete: true, hasValues: false };
+  }
+
+  const branches = getSchemaCombinatorBranches(node);
+  if (branches.length === 0) {
+    return { values: [], incomplete: true, hasValues: false };
+  }
+
+  const collected: unknown[] = [];
+  for (const branch of branches) {
+    const result = collectAllowedValuesFromSchemaNode(branch);
+    if (result.incomplete || !result.hasValues) {
+      return { values: [], incomplete: true, hasValues: false };
+    }
+    collected.push(...result.values);
+  }
+
+  return { values: collected, incomplete: false, hasValues: collected.length > 0 };
+}
+
+function advanceSchemaNodes(node: JsonSchemaNode, segment: ConfigPathSegment): JsonSchemaNode[] {
+  const branches = getSchemaCombinatorBranches(node);
+  if (branches.length > 0) {
+    return branches.flatMap((branch) => advanceSchemaNodes(branch, segment));
+  }
+
+  if (typeof segment === "number") {
+    const items = node.items;
+    if (Array.isArray(items)) {
+      const itemNode = toJsonSchemaNode(items[segment]);
+      return itemNode ? [itemNode] : [];
+    }
+    const itemNode = toJsonSchemaNode(items);
+    return itemNode ? [itemNode] : [];
+  }
+
+  const properties = toJsonSchemaNode(node.properties);
+  const propertyNode = properties ? toJsonSchemaNode(properties[segment]) : null;
+  if (propertyNode) {
+    return [propertyNode];
+  }
+
+  const additionalProperties = toJsonSchemaNode(node.additionalProperties);
+  return additionalProperties ? [additionalProperties] : [];
+}
+
+function collectAllowedValuesFromSchemaPath(
+  root: JsonSchemaNode,
+  path: readonly ConfigPathSegment[],
+): AllowedValuesCollection {
+  let currentNodes = [root];
+  for (const segment of path) {
+    currentNodes = currentNodes.flatMap((node) => advanceSchemaNodes(node, segment));
+    if (currentNodes.length === 0) {
+      return { values: [], incomplete: false, hasValues: false };
+    }
+  }
+
+  const collected: unknown[] = [];
+  for (const node of currentNodes) {
+    const result = collectAllowedValuesFromSchemaNode(node);
+    if (result.incomplete || !result.hasValues) {
+      return { values: [], incomplete: true, hasValues: false };
+    }
+    collected.push(...result.values);
+  }
+
+  return { values: collected, incomplete: false, hasValues: collected.length > 0 };
+}
+
+function collectAllowedValuesFromConfigPath(
+  path: readonly ConfigPathSegment[],
+): AllowedValuesCollection {
+  if (path[0] === "channels" && typeof path[1] === "string") {
+    const channelSchema = getBundledChannelConfigSchemaMap().get(path[1]);
+    const schemaRoot = toJsonSchemaNode(channelSchema?.schema);
+    if (schemaRoot) {
+      return collectAllowedValuesFromSchemaPath(schemaRoot, path.slice(2));
+    }
+  }
+
+  return { values: [], incomplete: false, hasValues: false };
+}
+
+function collectAllowedValuesFromCustomIssue(record: UnknownIssueRecord): AllowedValuesCollection {
+  const path = toConfigPathSegments(record.path);
+  const schemaValues = collectAllowedValuesFromConfigPath(path);
+  if (schemaValues.hasValues && !schemaValues.incomplete) {
+    return schemaValues;
+  }
+
+  const message = typeof record.message === "string" ? record.message : "";
+  const expectedMatch = message.match(CUSTOM_EXPECTED_ONE_OF_RE);
+  if (expectedMatch?.[1]) {
+    const values = [...expectedMatch[1].matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+    return { values, incomplete: false, hasValues: values.length > 0 };
+  }
+
+  return { values: [], incomplete: false, hasValues: false };
 }
 
 function collectAllowedValuesFromIssue(issue: unknown): AllowedValuesCollection {
@@ -91,6 +229,10 @@ function collectAllowedValuesFromIssue(issue: unknown): AllowedValuesCollection 
       return { values: [true, false], incomplete: false, hasValues: true };
     }
     return { values: [], incomplete: true, hasValues: false };
+  }
+
+  if (code === "custom") {
+    return collectAllowedValuesFromCustomIssue(record);
   }
 
   if (code !== "invalid_union") {
@@ -144,182 +286,14 @@ function collectAllowedValuesFromUnknownIssue(issue: unknown): unknown[] {
   return collection.values;
 }
 
-function collectAllowedValuesFromSchema(schema: JsonSchemaRecord): AllowedValuesCollection {
-  if (Array.isArray(schema.enum)) {
-    return {
-      values: schema.enum,
-      incomplete: false,
-      hasValues: schema.enum.length > 0,
-    };
-  }
-
-  if (Object.prototype.hasOwnProperty.call(schema, "const")) {
-    return {
-      values: [schema.const],
-      incomplete: false,
-      hasValues: true,
-    };
-  }
-
-  const type = schema.type;
-  if (type === "boolean") {
-    return { values: [true, false], incomplete: false, hasValues: true };
-  }
-  if (Array.isArray(type) && type.includes("boolean")) {
-    return type.length === 1
-      ? { values: [true, false], incomplete: false, hasValues: true }
-      : { values: [], incomplete: true, hasValues: false };
-  }
-
-  for (const branches of [schema.oneOf, schema.anyOf, schema.allOf]) {
-    if (!Array.isArray(branches) || branches.length === 0) {
-      continue;
-    }
-    const branchCollection = collectAllowedValuesFromSchemaList(
-      branches
-        .map((branch) => toJsonSchemaRecord(branch))
-        .filter((branch): branch is JsonSchemaRecord => branch !== null),
-    );
-    if (branchCollection.incomplete || !branchCollection.hasValues) {
-      return { values: [], incomplete: true, hasValues: false };
-    }
-    return branchCollection;
-  }
-
-  return { values: [], incomplete: true, hasValues: false };
-}
-
-function collectAllowedValuesFromSchemaList(
-  schemas: ReadonlyArray<JsonSchemaRecord>,
-): AllowedValuesCollection {
-  const collected: unknown[] = [];
-  let hasValues = false;
-  for (const schema of schemas) {
-    const branch = collectAllowedValuesFromSchema(schema);
-    if (branch.incomplete) {
-      return { values: [], incomplete: true, hasValues: false };
-    }
-    if (!branch.hasValues) {
-      continue;
-    }
-    hasValues = true;
-    collected.push(...branch.values);
-  }
-  return { values: collected, incomplete: false, hasValues };
-}
-
-function collectChildSchemasForSegment(
-  schema: JsonSchemaRecord,
-  segment: string,
-  visited = new WeakMap<JsonSchemaRecord, Set<string>>(),
-): JsonSchemaRecord[] {
-  const seenSegments = visited.get(schema);
-  if (seenSegments?.has(segment)) {
-    return [];
-  }
-  if (seenSegments) {
-    seenSegments.add(segment);
-  } else {
-    visited.set(schema, new Set([segment]));
-  }
-
-  const collected: JsonSchemaRecord[] = [];
-  const properties = schema.properties;
-  if (properties && Object.hasOwn(properties, segment)) {
-    const child = toJsonSchemaRecord(properties[segment]);
-    if (child) {
-      collected.push(child);
-    }
-  }
-
-  const itemIndex = /^\d+$/.test(segment) ? Number.parseInt(segment, 10) : undefined;
-  if (segment === "*" || itemIndex !== undefined) {
-    const items = schema.items;
-    if (Array.isArray(items)) {
-      const child =
-        itemIndex === undefined
-          ? items.find((candidate) => toJsonSchemaRecord(candidate))
-          : items[itemIndex];
-      const itemSchema = toJsonSchemaRecord(child);
-      if (itemSchema) {
-        collected.push(itemSchema);
-      }
-    } else {
-      const itemSchema = toJsonSchemaRecord(items);
-      if (itemSchema) {
-        collected.push(itemSchema);
-      }
-    }
-  }
-
-  if (collected.length === 0) {
-    const additionalProperties = toJsonSchemaRecord(schema.additionalProperties);
-    if (additionalProperties) {
-      collected.push(additionalProperties);
-    }
-  }
-
-  for (const branches of [schema.allOf, schema.oneOf, schema.anyOf]) {
-    if (!Array.isArray(branches)) {
-      continue;
-    }
-    for (const branch of branches) {
-      const branchSchema = toJsonSchemaRecord(branch);
-      if (!branchSchema) {
-        continue;
-      }
-      collected.push(...collectChildSchemasForSegment(branchSchema, segment, visited));
-    }
-  }
-
-  return Array.from(new Set(collected));
-}
-
-function collectAllowedValuesFromBundledChannelSchema(path: string): unknown[] {
-  const segments = path.split(".").filter(Boolean);
-  if (segments.length < 3 || segments[0] !== "channels") {
-    return [];
-  }
-
-  const rootSchema = toJsonSchemaRecord(bundledChannelSchemaById.get(segments[1]));
-  if (!rootSchema) {
-    return [];
-  }
-
-  let currentSchemas: JsonSchemaRecord[] = [rootSchema];
-  for (const segment of segments.slice(2)) {
-    const nextSchemas = currentSchemas.flatMap((schema) =>
-      collectChildSchemasForSegment(schema, segment),
-    );
-    if (nextSchemas.length === 0) {
-      return [];
-    }
-    currentSchemas = Array.from(new Set(nextSchemas));
-  }
-
-  const collection = collectAllowedValuesFromSchemaList(currentSchemas);
-  if (collection.incomplete || !collection.hasValues) {
-    return [];
-  }
-  return collection.values;
-}
-
 function mapZodIssueToConfigIssue(issue: unknown): ConfigValidationIssue {
   const record = toIssueRecord(issue);
-  const path = Array.isArray(record?.path)
-    ? record.path
-        .filter((segment): segment is string | number => {
-          const segmentType = typeof segment;
-          return segmentType === "string" || segmentType === "number";
-        })
-        .join(".")
-    : "";
+  const pathSegments = toConfigPathSegments(record?.path);
+  const path = formatConfigPath(pathSegments);
   const message = typeof record?.message === "string" ? record.message : "Invalid input";
   const issueAllowedValues = collectAllowedValuesFromUnknownIssue(issue);
-  const allowedValues =
-    issueAllowedValues.length > 0
-      ? issueAllowedValues
-      : collectAllowedValuesFromBundledChannelSchema(path);
+  const schemaAllowedValues = collectAllowedValuesFromConfigPath(pathSegments);
+  const allowedValues = issueAllowedValues.length > 0 ? issueAllowedValues : schemaAllowedValues.values;
   const allowedValuesSummary = summarizeAllowedValues(allowedValues);
 
   if (!allowedValuesSummary) {

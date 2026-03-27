@@ -58,6 +58,16 @@ type LoadedContractRegistries = {
   imageGenerationProviderContractRegistry: ImageGenerationProviderContractEntry[];
 };
 
+type LoadContractRuntimeRegistriesResult = {
+  registries: LoadedContractRegistries;
+  loadError?: Error;
+};
+
+type ContractPluginLoadFailure = {
+  pluginId: string;
+  error: Error;
+};
+
 const CONTRACT_PLUGIN_IMPORTERS: Record<string, ContractPluginImporter> = {
   "amazon-bedrock": () => import("../../../extensions/amazon-bedrock/index.js"),
   anthropic: () => import("../../../extensions/anthropic/index.js"),
@@ -170,7 +180,7 @@ function resolveWebSearchCredentialValue(provider: WebSearchProviderPlugin): unk
   return envVar.toLowerCase().includes("api_key") ? `${provider.id}-test` : "sk-test";
 }
 
-async function loadContractRuntimeRegistries(): Promise<LoadedContractRegistries> {
+async function loadContractRuntimeRegistries(): Promise<LoadContractRuntimeRegistriesResult> {
   const missingImporters = BUNDLED_RUNTIME_CONTRACT_PLUGIN_IDS.filter(
     (pluginId) => !CONTRACT_PLUGIN_IMPORTERS[pluginId],
   );
@@ -181,45 +191,63 @@ async function loadContractRuntimeRegistries(): Promise<LoadedContractRegistries
   }
 
   const registrations: Array<{ pluginId: string; captured: CapturedPluginRegistration }> = [];
+  const failures: ContractPluginLoadFailure[] = [];
   for (const pluginId of BUNDLED_RUNTIME_CONTRACT_PLUGIN_IDS) {
-    registrations.push(await loadContractPluginRegistration({ pluginId }));
+    try {
+      registrations.push(await loadContractPluginRegistration({ pluginId }));
+    } catch (error) {
+      failures.push({
+        pluginId,
+        error: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
   }
 
   return {
-    providerContractRegistry: registrations.flatMap(({ pluginId, captured }) =>
-      captured.providers.map((provider) => ({
-        pluginId,
-        provider: {
-          ...provider,
+    registries: {
+      providerContractRegistry: registrations.flatMap(({ pluginId, captured }) =>
+        captured.providers.map((provider) => ({
           pluginId,
-        },
-      })),
-    ),
-    webSearchProviderContractRegistry: registrations.flatMap(({ pluginId, captured }) =>
-      captured.webSearchProviders.map((provider) => ({
-        pluginId,
-        provider,
-        credentialValue: resolveWebSearchCredentialValue(provider),
-      })),
-    ),
-    speechProviderContractRegistry: registrations.flatMap(({ pluginId, captured }) =>
-      captured.speechProviders.map((provider) => ({
-        pluginId,
-        provider,
-      })),
-    ),
-    mediaUnderstandingProviderContractRegistry: registrations.flatMap(({ pluginId, captured }) =>
-      captured.mediaUnderstandingProviders.map((provider) => ({
-        pluginId,
-        provider,
-      })),
-    ),
-    imageGenerationProviderContractRegistry: registrations.flatMap(({ pluginId, captured }) =>
-      captured.imageGenerationProviders.map((provider) => ({
-        pluginId,
-        provider,
-      })),
-    ),
+          provider: {
+            ...provider,
+            pluginId,
+          },
+        })),
+      ),
+      webSearchProviderContractRegistry: registrations.flatMap(({ pluginId, captured }) =>
+        captured.webSearchProviders.map((provider) => ({
+          pluginId,
+          provider,
+          credentialValue: resolveWebSearchCredentialValue(provider),
+        })),
+      ),
+      speechProviderContractRegistry: registrations.flatMap(({ pluginId, captured }) =>
+        captured.speechProviders.map((provider) => ({
+          pluginId,
+          provider,
+        })),
+      ),
+      mediaUnderstandingProviderContractRegistry: registrations.flatMap(({ pluginId, captured }) =>
+        captured.mediaUnderstandingProviders.map((provider) => ({
+          pluginId,
+          provider,
+        })),
+      ),
+      imageGenerationProviderContractRegistry: registrations.flatMap(({ pluginId, captured }) =>
+        captured.imageGenerationProviders.map((provider) => ({
+          pluginId,
+          provider,
+        })),
+      ),
+    },
+    loadError:
+      failures.length > 0
+        ? new Error(
+            `failed to load contract plugins: ${failures
+              .map(({ pluginId, error }) => `${pluginId}: ${error.message}`)
+              .join("; ")}`,
+          )
+        : undefined,
   };
 }
 
@@ -234,7 +262,9 @@ let loadedContractRegistries: LoadedContractRegistries = {
 export let providerContractLoadError: Error | undefined;
 
 try {
-  loadedContractRegistries = await loadContractRuntimeRegistries();
+  const result = await loadContractRuntimeRegistries();
+  loadedContractRegistries = result.registries;
+  providerContractLoadError = result.loadError;
 } catch (error) {
   providerContractLoadError = error instanceof Error ? error : new Error(String(error));
 }
