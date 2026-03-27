@@ -6,6 +6,10 @@ import path from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import "./test-runtime-mocks.js";
 import type { MemoryIndexManager } from "./index.js";
+import {
+  clearTestMemoryEmbeddingProviderRegistry,
+  resetTestMemoryEmbeddingProviderRegistry,
+} from "./test-provider-registry.js";
 
 type MemoryIndexModule = typeof import("./index.js");
 
@@ -133,6 +137,7 @@ describe("memory index", () => {
   beforeAll(async () => {
     vi.resetModules();
     await import("./test-runtime-mocks.js");
+    await resetTestMemoryEmbeddingProviderRegistry();
     ({ getMemorySearchManager, closeAllMemorySearchManagers } = await import("./index.js"));
     fixtureRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-mem-fixtures-"));
     workspaceDir = path.join(fixtureRoot, "workspace");
@@ -156,6 +161,7 @@ describe("memory index", () => {
 
   afterAll(async () => {
     await Promise.all(Array.from(managersForCleanup).map((manager) => manager.close()));
+    await clearTestMemoryEmbeddingProviderRegistry();
     await fs.rm(fixtureRoot, { recursive: true, force: true });
   });
 
@@ -168,6 +174,7 @@ describe("memory index", () => {
     // Perf: most suites don't need atomic swap behavior for full reindexes.
     // Keep atomic reindex tests on the safe path.
     vi.stubEnv("OPENCLAW_TEST_MEMORY_UNSAFE_REINDEX", "1");
+    await resetTestMemoryEmbeddingProviderRegistry();
     embedBatchCalls = 0;
     embedBatchInputCalls = 0;
     providerCalls = [];
@@ -253,9 +260,8 @@ describe("memory index", () => {
     result: Awaited<ReturnType<typeof getMemorySearchManager>>,
     missingMessage = "manager missing",
   ): MemoryIndexManager {
-    expect(result.manager).not.toBeNull();
     if (!result.manager) {
-      throw new Error(missingMessage);
+      throw new Error(result.error ?? missingMessage);
     }
     return result.manager as MemoryIndexManager;
   }

@@ -905,7 +905,7 @@ export function createAgentEventHandler({
     const agentPayload = sessionKey ? { ...eventForClients, sessionKey } : eventForClients;
     const hasSeenRun = agentRunSeq.has(evt.runId);
     const last = agentRunSeq.get(evt.runId) ?? 0;
-    if (sessionKey && (lifecyclePhase === "start" || !hasSeenRun)) {
+    if (sessionKey && evt.seq > last && (lifecyclePhase === "start" || !hasSeenRun)) {
       chatRunState.markLatestSessionRun(sessionKey, clientRunId);
     }
     if (lifecyclePhase !== "error" && evt.seq > last) {

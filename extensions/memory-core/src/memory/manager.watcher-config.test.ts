@@ -5,6 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../engine-host-api.js";
 import type { MemorySearchConfig } from "../engine-host-api.js";
 import type { MemoryIndexManager } from "./index.js";
+import {
+  clearTestMemoryEmbeddingProviderRegistry,
+  resetTestMemoryEmbeddingProviderRegistry,
+} from "./test-provider-registry.js";
 
 const { watchMock } = vi.hoisted(() => ({
   watchMock: vi.fn(() => ({
@@ -46,6 +50,7 @@ describe("memory watcher config", () => {
 
   beforeEach(async () => {
     vi.resetModules();
+    await resetTestMemoryEmbeddingProviderRegistry();
     ({ getMemorySearchManager, closeAllMemorySearchManagers } = await import("./index.js"));
     vi.clearAllMocks();
   });
@@ -57,6 +62,7 @@ describe("memory watcher config", () => {
       manager = null;
     }
     await closeAllMemorySearchManagers();
+    await clearTestMemoryEmbeddingProviderRegistry();
     if (workspaceDir) {
       await fs.rm(workspaceDir, { recursive: true, force: true });
       workspaceDir = "";
@@ -95,9 +101,8 @@ describe("memory watcher config", () => {
 
   async function expectWatcherManager(cfg: OpenClawConfig) {
     const result = await getMemorySearchManager({ cfg, agentId: "main" });
-    expect(result.manager).not.toBeNull();
     if (!result.manager) {
-      throw new Error("manager missing");
+      throw new Error(result.error ?? "manager missing");
     }
     manager = result.manager as unknown as MemoryIndexManager;
   }

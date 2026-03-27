@@ -419,6 +419,86 @@ describe("agent event handler", () => {
     expect(agentRunSeq.has("client-old")).toBe(false);
   });
 
+  it("does not let an out-of-order lifecycle start roll latest session activity backward", async () => {
+    vi.useFakeTimers();
+    const { broadcast, broadcastToConnIds, chatRunState, handler, sessionEventSubscribers } =
+      createHarness({
+        resolveSessionKeyForRun: (runId) =>
+          runId === "run-old-stale-start" || runId === "run-new-stale-start"
+            ? "session-stale-start"
+            : undefined,
+      });
+    sessionEventSubscribers.subscribe("conn-session");
+    chatRunState.registry.add("run-old-stale-start", {
+      sessionKey: "session-stale-start",
+      clientRunId: "client-old-stale-start",
+    });
+    chatRunState.registry.add("run-new-stale-start", {
+      sessionKey: "session-stale-start",
+      clientRunId: "client-new-stale-start",
+    });
+
+    handler({
+      runId: "run-old-stale-start",
+      seq: 1,
+      stream: "lifecycle",
+      ts: 1_000,
+      data: { phase: "start", startedAt: 1_000 },
+    });
+    emitLifecycleError(handler, "run-old-stale-start", "temporary fallback", 2);
+    handler({
+      runId: "run-new-stale-start",
+      seq: 1,
+      stream: "lifecycle",
+      ts: 2_000,
+      data: { phase: "start", startedAt: 2_000 },
+    });
+    handler({
+      runId: "run-old-stale-start",
+      seq: 1,
+      stream: "lifecycle",
+      ts: 2_500,
+      data: { phase: "start", startedAt: 1_000 },
+    });
+
+    broadcastToConnIds.mockClear();
+    persistGatewaySessionLifecycleEventMock.mockClear();
+
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    const oldRunErrorPayloads = chatBroadcastCalls(broadcast).filter(([, payload]) => {
+      const typed = payload as { state?: string; runId?: string };
+      return typed.state === "error" && typed.runId === "client-old-stale-start";
+    });
+    expect(oldRunErrorPayloads).toHaveLength(0);
+
+    const sessionErrorCalls = broadcastToConnIds.mock.calls.filter(([event, payload]) => {
+      const typed = payload as { phase?: string; runId?: string };
+      return (
+        event === "sessions.changed" &&
+        typed.phase === "error" &&
+        typed.runId === "run-old-stale-start"
+      );
+    });
+    expect(sessionErrorCalls).toHaveLength(0);
+
+    const persistedErrorCalls = persistGatewaySessionLifecycleEventMock.mock.calls.filter(
+      ([params]) => {
+        const typed = params as {
+          sessionKey?: string;
+          event?: { runId?: string; data?: { phase?: string } };
+        };
+        return (
+          typed.sessionKey === "session-stale-start" &&
+          typed.event?.runId === "run-old-stale-start" &&
+          typed.event?.data?.phase === "error"
+        );
+      },
+    );
+    expect(persistedErrorCalls).toHaveLength(0);
+    expect(chatRunState.getLatestSessionRun("session-stale-start")).toBe("client-new-stale-start");
+  });
+
   it("ignores deferred lifecycle errors after a newer run has already completed", async () => {
     vi.useFakeTimers();
     const { broadcast, broadcastToConnIds, chatRunState, handler, sessionEventSubscribers } =
