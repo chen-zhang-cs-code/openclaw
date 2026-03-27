@@ -129,7 +129,7 @@ export function buildGoogleImageGenerationProvider(): ImageGenerationProvider {
     async generateImage(req) {
       const [{ resolveApiKeyForProvider }, { assertOkOrThrowHttpError, normalizeBaseUrl, postJsonRequest }] =
         await Promise.all([
-          import("openclaw/plugin-sdk/provider-auth"),
+          import("openclaw/plugin-sdk/image-generation-core"),
           import("openclaw/plugin-sdk/provider-http"),
         ]);
       const auth = await resolveApiKeyForProvider({

@@ -255,7 +255,7 @@ describe("openai plugin", () => {
     ).rejects.toThrow("does not support reference-image edits");
   });
 
-  it("bootstraps the env proxy dispatcher before refreshing oauth credentials", async () => {
+  it("bootstraps the env proxy dispatcher before refreshing codex oauth credentials", async () => {
     const refreshed = {
       access: "next-access",
       refresh: "next-refresh",

@@ -590,17 +590,44 @@ export function createAgentEventHandler({
     const snapshotSource = session ?? lifecyclePatch;
     return {
       ...(session ? { session } : {}),
+      updatedAt: snapshotSource.updatedAt,
+      sessionId: row?.sessionId,
+      kind: row?.kind,
+      channel: row?.channel,
+      subject: row?.subject,
+      groupChannel: row?.groupChannel,
+      space: row?.space,
+      chatType: row?.chatType,
+      origin: row?.origin,
+      spawnedBy: row?.spawnedBy,
+      label: row?.label,
+      displayName: row?.displayName,
+      deliveryContext: row?.deliveryContext,
+      parentSessionKey: row?.parentSessionKey,
+      childSessions: row?.childSessions,
+      thinkingLevel: row?.thinkingLevel,
+      fastMode: row?.fastMode,
+      verboseLevel: row?.verboseLevel,
+      reasoningLevel: row?.reasoningLevel,
+      elevatedLevel: row?.elevatedLevel,
+      sendPolicy: row?.sendPolicy,
+      systemSent: row?.systemSent,
+      inputTokens: row?.inputTokens,
+      outputTokens: row?.outputTokens,
+      lastChannel: row?.lastChannel,
+      lastTo: row?.lastTo,
+      lastAccountId: row?.lastAccountId,
       totalTokens: row?.totalTokens,
       totalTokensFresh: row?.totalTokensFresh,
       contextTokens: row?.contextTokens,
       estimatedCostUsd: row?.estimatedCostUsd,
+      responseUsage: row?.responseUsage,
       modelProvider: row?.modelProvider,
       model: row?.model,
       status: snapshotSource.status,
       startedAt: snapshotSource.startedAt,
       endedAt: snapshotSource.endedAt,
       runtimeMs: snapshotSource.runtimeMs,
-      updatedAt: snapshotSource.updatedAt,
       abortedLastRun: snapshotSource.abortedLastRun,
     };
   };
@@ -905,7 +932,8 @@ export function createAgentEventHandler({
     const agentPayload = sessionKey ? { ...eventForClients, sessionKey } : eventForClients;
     const hasSeenRun = agentRunSeq.has(evt.runId);
     const last = agentRunSeq.get(evt.runId) ?? 0;
-    if (sessionKey && evt.seq > last && (lifecyclePhase === "start" || !hasSeenRun)) {
+    const isNextSeq = hasSeenRun ? evt.seq === last + 1 : evt.seq > last;
+    if (sessionKey && isNextSeq && (lifecyclePhase === "start" || !hasSeenRun)) {
       chatRunState.markLatestSessionRun(sessionKey, clientRunId);
     }
     if (lifecyclePhase !== "error" && evt.seq > last) {

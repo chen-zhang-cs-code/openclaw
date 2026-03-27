@@ -1,19 +1,12 @@
+import * as imageGenerationCore from "openclaw/plugin-sdk/image-generation-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildGoogleImageGenerationProvider } from "./image-generation-provider.js";
 import { __testing as geminiWebSearchTesting } from "./src/gemini-web-search-provider.js";
 
-const { resolveApiKeyForProviderMock } = vi.hoisted(() => ({
-  resolveApiKeyForProviderMock: vi.fn(),
-}));
 const { postJsonRequestMock } = vi.hoisted(() => ({
   postJsonRequestMock: vi.fn(),
 }));
 
-vi.mock("openclaw/plugin-sdk/provider-auth", () => {
-  return {
-    resolveApiKeyForProvider: resolveApiKeyForProviderMock,
-  };
-});
 vi.mock("openclaw/plugin-sdk/provider-http", () => ({
   assertOkOrThrowHttpError: async (res: { ok?: boolean; status?: number }, label: string) => {
     if (!res.ok) {
@@ -26,7 +19,7 @@ vi.mock("openclaw/plugin-sdk/provider-http", () => ({
 }));
 
 function mockGoogleApiKeyAuth() {
-  resolveApiKeyForProviderMock.mockResolvedValue({
+  vi.spyOn(imageGenerationCore, "resolveApiKeyForProvider").mockResolvedValue({
     apiKey: "google-test-key",
     source: "env",
     mode: "api-key",
@@ -70,12 +63,11 @@ function installGoogleRequestMock(params?: {
 describe("Google image-generation provider", () => {
   afterEach(() => {
     vi.restoreAllMocks();
-    resolveApiKeyForProviderMock.mockReset();
     postJsonRequestMock.mockReset();
   });
 
   it("generates image buffers from the Gemini generateContent API", async () => {
-    resolveApiKeyForProviderMock.mockResolvedValue({
+    vi.spyOn(imageGenerationCore, "resolveApiKeyForProvider").mockResolvedValue({
       apiKey: "google-test-key",
       source: "env",
       mode: "api-key",
@@ -125,7 +117,7 @@ describe("Google image-generation provider", () => {
   });
 
   it("accepts OAuth JSON auth and inline_data responses", async () => {
-    resolveApiKeyForProviderMock.mockResolvedValue({
+    vi.spyOn(imageGenerationCore, "resolveApiKeyForProvider").mockResolvedValue({
       apiKey: JSON.stringify({ token: "oauth-token" }),
       source: "profile",
       mode: "token",
