@@ -20,6 +20,7 @@ import plugin from "./index.js";
 const runtimeMocks = vi.hoisted(() => ({
   ensureGlobalUndiciEnvProxyDispatcher: vi.fn(),
   getOAuthApiKey: vi.fn(),
+  refreshOpenAICodexToken: vi.fn(),
 }));
 
 vi.mock("openclaw/plugin-sdk/infra-runtime", () => ({
@@ -28,9 +29,10 @@ vi.mock("openclaw/plugin-sdk/infra-runtime", () => ({
 
 vi.mock("@mariozechner/pi-ai/oauth", () => ({
   getOAuthApiKey: runtimeMocks.getOAuthApiKey,
+  refreshOpenAICodexToken: runtimeMocks.refreshOpenAICodexToken,
 }));
 
-import { getOAuthApiKey as getCodexOAuthApiKey } from "./openai-codex-provider.runtime.js";
+import { refreshOpenAICodexToken as refreshCodexOAuthToken } from "./openai-codex-provider.runtime.js";
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? "";
 const LIVE_MODEL_ID = process.env.OPENCLAW_LIVE_OPENAI_PLUGIN_MODEL?.trim() || "gpt-5.4-nano";
@@ -255,31 +257,20 @@ describe("openai plugin", () => {
 
   it("bootstraps the env proxy dispatcher before refreshing oauth credentials", async () => {
     const refreshed = {
-      newCredentials: {
-        access: "next-access",
-        refresh: "next-refresh",
-        expires: Date.now() + 60_000,
-      },
+      access: "next-access",
+      refresh: "next-refresh",
+      expires: Date.now() + 60_000,
+      accountId: "account-1",
     };
-    runtimeMocks.getOAuthApiKey.mockResolvedValue(refreshed);
+    runtimeMocks.refreshOpenAICodexToken.mockResolvedValue(refreshed);
 
-    await expect(
-      getCodexOAuthApiKey("openai-codex", {
-        "openai-codex": {
-          provider: "openai-codex",
-          type: "oauth",
-          access: "access-token",
-          refresh: "refresh-token",
-          expires: Date.now(),
-        },
-      }),
-    ).resolves.toBe(refreshed);
+    await expect(refreshCodexOAuthToken("refresh-token")).resolves.toBe(refreshed);
 
     expect(runtimeMocks.ensureGlobalUndiciEnvProxyDispatcher).toHaveBeenCalledOnce();
-    expect(runtimeMocks.getOAuthApiKey).toHaveBeenCalledOnce();
+    expect(runtimeMocks.refreshOpenAICodexToken).toHaveBeenCalledOnce();
     expect(
       runtimeMocks.ensureGlobalUndiciEnvProxyDispatcher.mock.invocationCallOrder[0],
-    ).toBeLessThan(runtimeMocks.getOAuthApiKey.mock.invocationCallOrder[0]);
+    ).toBeLessThan(runtimeMocks.refreshOpenAICodexToken.mock.invocationCallOrder[0]);
   });
 });
 

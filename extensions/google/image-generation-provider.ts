@@ -1,16 +1,10 @@
 import type { ImageGenerationProvider } from "openclaw/plugin-sdk/image-generation";
-import { resolveApiKeyForProvider } from "openclaw/plugin-sdk/provider-auth";
 import {
   DEFAULT_GOOGLE_API_BASE_URL,
   normalizeGoogleApiBaseUrl,
   normalizeGoogleModelId,
   parseGeminiAuth,
 } from "openclaw/plugin-sdk/provider-google";
-import {
-  assertOkOrThrowHttpError,
-  normalizeBaseUrl,
-  postJsonRequest,
-} from "openclaw/plugin-sdk/provider-http";
 
 const DEFAULT_GOOGLE_IMAGE_MODEL = "gemini-3.1-flash-image-preview";
 const DEFAULT_OUTPUT_MIME = "image/png";
@@ -52,7 +46,17 @@ type GoogleGenerateImageResponse = {
   }>;
 };
 
-function resolveGoogleBaseUrl(cfg: Parameters<typeof resolveApiKeyForProvider>[0]["cfg"]): string {
+type GoogleProviderConfig = {
+  models?: {
+    providers?: {
+      google?: {
+        baseUrl?: string;
+      };
+    };
+  };
+};
+
+function resolveGoogleBaseUrl(cfg: GoogleProviderConfig | undefined): string {
   return normalizeGoogleApiBaseUrl(cfg?.models?.providers?.google?.baseUrl);
 }
 
@@ -123,6 +127,11 @@ export function buildGoogleImageGenerationProvider(): ImageGenerationProvider {
       },
     },
     async generateImage(req) {
+      const [{ resolveApiKeyForProvider }, { assertOkOrThrowHttpError, normalizeBaseUrl, postJsonRequest }] =
+        await Promise.all([
+          import("openclaw/plugin-sdk/provider-auth"),
+          import("openclaw/plugin-sdk/provider-http"),
+        ]);
       const auth = await resolveApiKeyForProvider({
         provider: "google",
         cfg: req.cfg,

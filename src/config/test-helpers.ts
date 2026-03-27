@@ -1,10 +1,21 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { withTempHome as withTempHomeBase } from "../../test/helpers/temp-home.js";
-import type { OpenClawConfig } from "./config.js";
+import {
+  clearConfigCache,
+  clearRuntimeConfigSnapshot,
+  type OpenClawConfig,
+} from "./config.js";
 
 export async function withTempHome<T>(fn: (home: string) => Promise<T>): Promise<T> {
-  return withTempHomeBase(fn, { prefix: "openclaw-config-" });
+  clearRuntimeConfigSnapshot();
+  clearConfigCache();
+  try {
+    return await withTempHomeBase(fn, { prefix: "openclaw-config-" });
+  } finally {
+    clearRuntimeConfigSnapshot();
+    clearConfigCache();
+  }
 }
 
 export async function writeOpenClawConfig(home: string, config: unknown): Promise<string> {

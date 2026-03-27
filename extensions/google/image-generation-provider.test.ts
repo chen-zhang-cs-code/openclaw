@@ -1,17 +1,39 @@
-import * as providerAuth from "openclaw/plugin-sdk/provider-auth";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildGoogleImageGenerationProvider } from "./image-generation-provider.js";
 import { __testing as geminiWebSearchTesting } from "./src/gemini-web-search-provider.js";
 
+const { resolveApiKeyForProviderMock } = vi.hoisted(() => ({
+  resolveApiKeyForProviderMock: vi.fn(),
+}));
+const { postJsonRequestMock } = vi.hoisted(() => ({
+  postJsonRequestMock: vi.fn(),
+}));
+
+vi.mock("openclaw/plugin-sdk/provider-auth", () => {
+  return {
+    resolveApiKeyForProvider: resolveApiKeyForProviderMock,
+  };
+});
+vi.mock("openclaw/plugin-sdk/provider-http", () => ({
+  assertOkOrThrowHttpError: async (res: { ok?: boolean; status?: number }, label: string) => {
+    if (!res.ok) {
+      throw new Error(`${label} (HTTP ${res.status ?? 500})`);
+    }
+  },
+  normalizeBaseUrl: (baseUrl: string | undefined, fallback: string) =>
+    (baseUrl?.trim() || fallback).replace(/\/+$/, ""),
+  postJsonRequest: postJsonRequestMock,
+}));
+
 function mockGoogleApiKeyAuth() {
-  vi.spyOn(providerAuth, "resolveApiKeyForProvider").mockResolvedValue({
+  resolveApiKeyForProviderMock.mockResolvedValue({
     apiKey: "google-test-key",
     source: "env",
     mode: "api-key",
   });
 }
 
-function installGoogleFetchMock(params?: {
+function installGoogleRequestMock(params?: {
   data?: string;
   mimeType?: string;
   inlineDataKey?: "inlineData" | "inline_data";
@@ -19,52 +41,19 @@ function installGoogleFetchMock(params?: {
   const mimeType = params?.mimeType ?? "image/png";
   const data = params?.data ?? "png-data";
   const inlineDataKey = params?.inlineDataKey ?? "inlineData";
-  const fetchMock = vi.fn().mockResolvedValue({
-    ok: true,
-    json: async () => ({
-      candidates: [
-        {
-          content: {
-            parts: [
-              {
-                [inlineDataKey]: {
-                  [inlineDataKey === "inlineData" ? "mimeType" : "mime_type"]: mimeType,
-                  data: Buffer.from(data).toString("base64"),
-                },
-              },
-            ],
-          },
-        },
-      ],
-    }),
-  });
-  vi.stubGlobal("fetch", fetchMock);
-  return fetchMock;
-}
-
-describe("Google image-generation provider", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("generates image buffers from the Gemini generateContent API", async () => {
-    vi.spyOn(providerAuth, "resolveApiKeyForProvider").mockResolvedValue({
-      apiKey: "google-test-key",
-      source: "env",
-      mode: "api-key",
-    });
-    const fetchMock = vi.fn().mockResolvedValue({
+  const release = vi.fn(async () => undefined);
+  postJsonRequestMock.mockResolvedValue({
+    response: {
       ok: true,
       json: async () => ({
         candidates: [
           {
             content: {
               parts: [
-                { text: "generated" },
                 {
-                  inlineData: {
-                    mimeType: "image/png",
-                    data: Buffer.from("png-data").toString("base64"),
+                  [inlineDataKey]: {
+                    [inlineDataKey === "inlineData" ? "mimeType" : "mime_type"]: mimeType,
+                    data: Buffer.from(data).toString("base64"),
                   },
                 },
               ],
@@ -72,8 +61,26 @@ describe("Google image-generation provider", () => {
           },
         ],
       }),
+    },
+    release,
+  });
+  return { release };
+}
+
+describe("Google image-generation provider", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resolveApiKeyForProviderMock.mockReset();
+    postJsonRequestMock.mockReset();
+  });
+
+  it("generates image buffers from the Gemini generateContent API", async () => {
+    resolveApiKeyForProviderMock.mockResolvedValue({
+      apiKey: "google-test-key",
+      source: "env",
+      mode: "api-key",
     });
-    vi.stubGlobal("fetch", fetchMock);
+    const { release } = installGoogleRequestMock();
 
     const provider = buildGoogleImageGenerationProvider();
     const result = await provider.generateImage({
@@ -84,11 +91,10 @@ describe("Google image-generation provider", () => {
       size: "1536x1024",
     });
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent",
+    expect(postJsonRequestMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
+        url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent",
+        body: {
           contents: [
             {
               role: "user",
@@ -102,9 +108,10 @@ describe("Google image-generation provider", () => {
               imageSize: "2K",
             },
           },
-        }),
+        },
       }),
     );
+    expect(release).toHaveBeenCalledOnce();
     expect(result).toEqual({
       images: [
         {
@@ -118,31 +125,16 @@ describe("Google image-generation provider", () => {
   });
 
   it("accepts OAuth JSON auth and inline_data responses", async () => {
-    vi.spyOn(providerAuth, "resolveApiKeyForProvider").mockResolvedValue({
+    resolveApiKeyForProviderMock.mockResolvedValue({
       apiKey: JSON.stringify({ token: "oauth-token" }),
       source: "profile",
       mode: "token",
     });
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        candidates: [
-          {
-            content: {
-              parts: [
-                {
-                  inline_data: {
-                    mime_type: "image/jpeg",
-                    data: Buffer.from("jpg-data").toString("base64"),
-                  },
-                },
-              ],
-            },
-          },
-        ],
-      }),
+    installGoogleRequestMock({
+      data: "jpg-data",
+      mimeType: "image/jpeg",
+      inlineDataKey: "inline_data",
     });
-    vi.stubGlobal("fetch", fetchMock);
 
     const provider = buildGoogleImageGenerationProvider();
     const result = await provider.generateImage({
@@ -152,14 +144,13 @@ describe("Google image-generation provider", () => {
       cfg: {},
     });
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      expect.any(String),
+    const request = postJsonRequestMock.mock.calls[0]?.[0];
+    expect(request).toEqual(
       expect.objectContaining({
         headers: expect.any(Headers),
       }),
     );
-    const [, init] = fetchMock.mock.calls[0];
-    expect(new Headers(init.headers).get("authorization")).toBe("Bearer oauth-token");
+    expect(new Headers(request.headers).get("authorization")).toBe("Bearer oauth-token");
     expect(result).toEqual({
       images: [
         {
@@ -174,7 +165,7 @@ describe("Google image-generation provider", () => {
 
   it("sends reference images and explicit resolution for edit flows", async () => {
     mockGoogleApiKeyAuth();
-    const fetchMock = installGoogleFetchMock();
+    installGoogleRequestMock();
 
     const provider = buildGoogleImageGenerationProvider();
     await provider.generateImage({
@@ -192,11 +183,10 @@ describe("Google image-generation provider", () => {
       ],
     });
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-image-preview:generateContent",
+    expect(postJsonRequestMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
+        url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-image-preview:generateContent",
+        body: {
           contents: [
             {
               role: "user",
@@ -217,14 +207,14 @@ describe("Google image-generation provider", () => {
               imageSize: "4K",
             },
           },
-        }),
+        },
       }),
     );
   });
 
   it("forwards explicit aspect ratio without forcing a default when size is omitted", async () => {
     mockGoogleApiKeyAuth();
-    const fetchMock = installGoogleFetchMock();
+    installGoogleRequestMock();
 
     const provider = buildGoogleImageGenerationProvider();
     await provider.generateImage({
@@ -235,11 +225,10 @@ describe("Google image-generation provider", () => {
       aspectRatio: "9:16",
     });
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-image-preview:generateContent",
+    expect(postJsonRequestMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
+        url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-image-preview:generateContent",
+        body: {
           contents: [
             {
               role: "user",
@@ -252,14 +241,14 @@ describe("Google image-generation provider", () => {
               aspectRatio: "9:16",
             },
           },
-        }),
+        },
       }),
     );
   });
 
   it("normalizes a configured bare Google host to the v1beta API root", async () => {
     mockGoogleApiKeyAuth();
-    const fetchMock = installGoogleFetchMock();
+    installGoogleRequestMock();
 
     const provider = buildGoogleImageGenerationProvider();
     await provider.generateImage({
@@ -278,9 +267,10 @@ describe("Google image-generation provider", () => {
       },
     });
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-image-preview:generateContent",
-      expect.any(Object),
+    expect(postJsonRequestMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-image-preview:generateContent",
+      }),
     );
   });
 

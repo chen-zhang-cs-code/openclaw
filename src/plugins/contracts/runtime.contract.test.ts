@@ -11,6 +11,7 @@ import { registerProviders, requireProvider } from "./testkit.js";
 const CONTRACT_SETUP_TIMEOUT_MS = 300_000;
 
 const getOAuthApiKeyMock = vi.hoisted(() => vi.fn());
+const refreshOpenAICodexTokenMock = vi.hoisted(() => vi.fn());
 const getOAuthProvidersMock = vi.hoisted(() =>
   vi.fn(() => [
     { id: "anthropic", envApiKey: "ANTHROPIC_API_KEY", oauthTokenEnv: "ANTHROPIC_OAUTH_TOKEN" }, // pragma: allowlist secret
@@ -27,6 +28,7 @@ vi.mock("@mariozechner/pi-ai/oauth", async () => {
     ...actual,
     getOAuthApiKey: getOAuthApiKeyMock,
     getOAuthProviders: getOAuthProvidersMock,
+    refreshOpenAICodexToken: refreshOpenAICodexTokenMock,
   };
 });
 
@@ -55,6 +57,7 @@ function requireProviderContractProvider(providerId: string): ProviderPlugin {
 describe("provider runtime contract", () => {
   beforeEach(() => {
     getOAuthApiKeyMock.mockReset();
+    refreshOpenAICodexTokenMock.mockReset();
     getOAuthProvidersMock.mockClear();
   }, CONTRACT_SETUP_TIMEOUT_MS);
 
@@ -530,8 +533,9 @@ describe("provider runtime contract", () => {
         expires: Date.now() - 60_000,
       };
 
-      getOAuthApiKeyMock.mockReset();
-      getOAuthApiKeyMock.mockRejectedValueOnce(new Error("Failed to extract accountId from token"));
+      refreshOpenAICodexTokenMock.mockRejectedValueOnce(
+        new Error("Failed to extract accountId from token"),
+      );
 
       await expect(provider.refreshOAuth?.(credential)).resolves.toEqual(credential);
     });
