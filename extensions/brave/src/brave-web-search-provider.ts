@@ -29,6 +29,7 @@ import {
 
 const BRAVE_SEARCH_ENDPOINT = "https://api.search.brave.com/res/v1/web/search";
 const BRAVE_LLM_CONTEXT_ENDPOINT = "https://api.search.brave.com/res/v1/llm/context";
+// Mirror Brave's documented country enum so unsupported locale guesses can collapse to ALL.
 const BRAVE_COUNTRY_CODES = new Set([
   "AR",
   "AU",
