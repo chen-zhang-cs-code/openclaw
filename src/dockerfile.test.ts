@@ -40,12 +40,13 @@ describe("Dockerfile", () => {
 
   it("installs runtime dependencies in a dedicated prod-deps stage", async () => {
     const dockerfile = await readFile(dockerfilePath, "utf8");
+    const helperScriptsCopyLine =
+      "COPY scripts/postinstall-bundled-plugins.mjs scripts/npm-runner.mjs scripts/windows-cmd-helpers.mjs ./scripts/";
     const extDepsCopyIndex = dockerfile.indexOf(
       "COPY --from=ext-deps /out/ ./${OPENCLAW_BUNDLED_PLUGIN_DIR}/",
     );
-    const prodPostinstallScriptCopyIndex = dockerfile.indexOf(
-      "COPY scripts/postinstall-bundled-plugins.mjs ./scripts/postinstall-bundled-plugins.mjs",
-    );
+    const prodPostinstallScriptCopyIndex = dockerfile.indexOf(helperScriptsCopyLine);
+    const buildPostinstallScriptCopyIndex = dockerfile.lastIndexOf(helperScriptsCopyLine);
     const prodInstallIndex = dockerfile.indexOf("pnpm install --frozen-lockfile --prod");
     const fullCopyIndex = dockerfile.indexOf("COPY . .");
     const runtimeExtensionsCopyIndex = dockerfile.indexOf(
@@ -62,6 +63,8 @@ describe("Dockerfile", () => {
     expect(fullCopyIndex).toBeGreaterThan(-1);
     expect(extDepsCopyIndex).toBeLessThan(prodInstallIndex);
     expect(prodPostinstallScriptCopyIndex).toBeLessThan(prodInstallIndex);
+    expect(buildPostinstallScriptCopyIndex).toBeGreaterThan(prodInstallIndex);
+    expect(buildPostinstallScriptCopyIndex).toBeLessThan(fullCopyIndex);
     expect(fullCopyIndex).toBeGreaterThan(prodInstallIndex);
     expect(dockerfile).toContain("FROM build AS runtime-assets");
     expect(dockerfile).not.toContain(
