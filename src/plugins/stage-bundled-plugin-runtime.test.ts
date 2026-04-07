@@ -71,6 +71,12 @@ function expectRuntimeArtifactText(params: {
   expect(fs.readFileSync(runtimePath, "utf8")).toBe(params.expectedText);
 }
 
+function expectRuntimeFile(filePath: string, expectedContent: string) {
+  const stats = fs.lstatSync(filePath);
+  expect(stats.isSymbolicLink() || stats.isFile()).toBe(true);
+  expect(fs.readFileSync(filePath, "utf8")).toBe(expectedContent);
+}
+
 afterEach(() => {
   cleanupTrackedTempDirs(tempDirs);
 });
@@ -258,7 +264,7 @@ describe("stageBundledPluginRuntime", () => {
     ).resolves.toEqual({ text: "paired:now" });
   });
 
-  it("copies package metadata files but symlinks other non-js plugin artifacts into the runtime overlay", () => {
+  it("copies package metadata files and keeps non-js plugin artifacts readable from the runtime overlay", () => {
     const repoRoot = makeRepoRoot("openclaw-stage-bundled-runtime-assets-");
     createDistPluginDir(repoRoot, "diffs");
     setupRepoFiles(repoRoot, {
@@ -280,13 +286,6 @@ describe("stageBundledPluginRuntime", () => {
       expectedText: "{}\n",
       symbolicLink: false,
     });
-    expectRuntimeArtifactText({
-      repoRoot,
-      pluginId: "diffs",
-      relativePath: "assets/info.txt",
-      expectedText: "ok\n",
-      symbolicLink: true,
-    });
     const runtimePackagePath = path.join(
       repoRoot,
       "dist-runtime",
@@ -294,8 +293,17 @@ describe("stageBundledPluginRuntime", () => {
       "diffs",
       "package.json",
     );
+    const runtimeAssetPath = path.join(
+      repoRoot,
+      "dist-runtime",
+      "extensions",
+      "diffs",
+      "assets",
+      "info.txt",
+    );
     expect(fs.lstatSync(runtimePackagePath).isSymbolicLink()).toBe(false);
     expect(fs.readFileSync(runtimePackagePath, "utf8")).toContain('"extensions": [');
+    expectRuntimeFile(runtimeAssetPath, "ok\n");
   });
 
   it("preserves package metadata needed for bundled plugin discovery from dist-runtime", () => {
@@ -419,8 +427,41 @@ describe("stageBundledPluginRuntime", () => {
       "feishu-doc",
       "SKILL.md",
     );
-    expect(fs.lstatSync(runtimeSkillPath).isSymbolicLink()).toBe(true);
-    expect(fs.readFileSync(runtimeSkillPath, "utf8")).toBe("# Feishu Doc\n");
+    expectRuntimeFile(runtimeSkillPath, "# Feishu Doc\n");
+
+    symlinkSpy.mockRestore();
+  });
+
+  it("copies runtime assets when symlink creation is blocked by platform permissions", () => {
+    const repoRoot = makeRepoRoot("openclaw-stage-bundled-runtime-eperm-");
+    createDistPluginDir(repoRoot, "diffs");
+    setupRepoFiles(repoRoot, {
+      [bundledDistPluginFile("diffs", "index.js")]: "export default {}\n",
+      [bundledDistPluginFile("diffs", "assets/info.txt")]: "ok\n",
+    });
+
+    const realSymlinkSync = fs.symlinkSync.bind(fs);
+    const symlinkSpy = vi.spyOn(fs, "symlinkSync").mockImplementation(((target, link, type) => {
+      const linkPath = String(link);
+      if (linkPath.endsWith(path.join("assets", "info.txt"))) {
+        const err = Object.assign(new Error("permission denied"), { code: "EPERM" });
+        throw err;
+      }
+      return realSymlinkSync(String(target), linkPath, type);
+    }) as typeof fs.symlinkSync);
+
+    expect(() => stageBundledPluginRuntime({ repoRoot })).not.toThrow();
+
+    const runtimeAssetPath = path.join(
+      repoRoot,
+      "dist-runtime",
+      "extensions",
+      "diffs",
+      "assets",
+      "info.txt",
+    );
+    expect(fs.lstatSync(runtimeAssetPath).isSymbolicLink()).toBe(false);
+    expect(fs.readFileSync(runtimeAssetPath, "utf8")).toBe("ok\n");
 
     symlinkSpy.mockRestore();
   });

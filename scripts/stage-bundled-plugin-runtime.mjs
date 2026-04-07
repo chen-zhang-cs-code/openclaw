@@ -7,6 +7,10 @@ function symlinkType() {
   return process.platform === "win32" ? "junction" : "dir";
 }
 
+function isSymlinkPermissionError(error) {
+  return error?.code === "EPERM" || error?.code === "EACCES";
+}
+
 function relativeSymlinkTarget(sourcePath, targetPath) {
   const relativeTarget = path.relative(path.dirname(targetPath), sourcePath);
   return relativeTarget || ".";
@@ -35,7 +39,15 @@ function ensureSymlink(targetValue, targetPath, type) {
 }
 
 function symlinkPath(sourcePath, targetPath, type) {
-  ensureSymlink(relativeSymlinkTarget(sourcePath, targetPath), targetPath, type);
+  try {
+    ensureSymlink(relativeSymlinkTarget(sourcePath, targetPath), targetPath, type);
+  } catch (error) {
+    if (!isSymlinkPermissionError(error)) {
+      throw error;
+    }
+    removePathIfExists(targetPath);
+    fs.copyFileSync(sourcePath, targetPath);
+  }
 }
 
 function shouldWrapRuntimeJsFile(sourcePath) {
@@ -85,7 +97,15 @@ function stagePluginRuntimeOverlay(sourceDir, targetDir) {
     }
 
     if (dirent.isSymbolicLink()) {
-      ensureSymlink(fs.readlinkSync(sourcePath), targetPath);
+      try {
+        ensureSymlink(fs.readlinkSync(sourcePath), targetPath);
+      } catch (error) {
+        if (!isSymlinkPermissionError(error)) {
+          throw error;
+        }
+        removePathIfExists(targetPath);
+        fs.copyFileSync(fs.realpathSync(sourcePath), targetPath);
+      }
       continue;
     }
 
