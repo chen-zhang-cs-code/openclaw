@@ -16,9 +16,8 @@ const resolveSessionAuthProfileOverrideMock = vi.fn();
 const getActiveEmbeddedRunSnapshotMock = vi.fn();
 const diagDebugMock = vi.fn();
 
-vi.mock("@mariozechner/pi-ai", async () => {
-  const original =
-    await vi.importActual<typeof import("@mariozechner/pi-ai")>("@mariozechner/pi-ai");
+vi.mock("@mariozechner/pi-ai", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@mariozechner/pi-ai")>();
   return {
     ...original,
     streamSimple: (...args: unknown[]) => streamSimpleMock(...args),
@@ -108,30 +107,6 @@ function createDoneEvent(text: string) {
     message: {
       role: "assistant",
       content: [{ type: "text", text }],
-      provider: DEFAULT_PROVIDER,
-      api: "anthropic-messages",
-      model: DEFAULT_MODEL,
-      stopReason: "stop",
-      usage: {
-        input: 1,
-        output: 2,
-        cacheRead: 0,
-        cacheWrite: 0,
-        totalTokens: 3,
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-      },
-      timestamp: Date.now(),
-    },
-  };
-}
-
-function createThinkingOnlyDoneEvent(thinking: string) {
-  return {
-    type: "done",
-    reason: "stop",
-    message: {
-      role: "assistant",
-      content: [{ type: "thinking", thinking }],
       provider: DEFAULT_PROVIDER,
       api: "anthropic-messages",
       model: DEFAULT_MODEL,
@@ -295,28 +270,6 @@ describe("runBtwSideQuestion", () => {
     const result = await runSideQuestion();
 
     expect(result).toEqual({ text: "Final answer." });
-  });
-
-  it("forces provider reasoning off even when the session think level is adaptive", async () => {
-    streamSimpleMock.mockImplementation((_model, _input, options?: { reasoning?: unknown }) => {
-      return options?.reasoning === undefined
-        ? makeAsyncEvents([createDoneEvent("Final answer.")])
-        : makeAsyncEvents([createThinkingOnlyDoneEvent("thinking only")]);
-    });
-
-    const result = await runSideQuestion({ resolvedThinkLevel: "adaptive" });
-
-    expect(result).toEqual({ text: "Final answer." });
-    expect(streamSimpleMock).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.objectContaining({ reasoning: undefined }),
-    );
-    expect(streamSimpleMock).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.not.objectContaining({ reasoning: expect.anything() }),
-    );
   });
 
   it("fails when the current branch has no messages", async () => {
@@ -534,5 +487,83 @@ describe("runBtwSideQuestion", () => {
     expect((context as { messages?: Array<{ role?: string }> }).messages).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ role: "toolResult" })]),
     );
+  });
+
+  it("does not require an API key for aws-sdk-authenticated models", async () => {
+    resolveModelWithRegistryMock.mockReturnValue({
+      provider: "amazon-bedrock",
+      id: "claude-sonnet-4-6",
+      api: "bedrock-converse-stream",
+    });
+    getApiKeyForModelMock.mockResolvedValue({ mode: "aws-sdk", source: "test" });
+    mockDoneAnswer(MATH_ANSWER);
+
+    const result = await runMathSideQuestion({ provider: "amazon-bedrock" });
+
+    expect(result).toEqual({ text: MATH_ANSWER });
+    expect(requireApiKeyMock).not.toHaveBeenCalled();
+    const [, , options] = streamSimpleMock.mock.calls[0] ?? [];
+    expect((options as { apiKey?: string } | undefined)?.apiKey).toBeUndefined();
+  });
+
+  it("strips assistant tool calls from BTW context before streaming", async () => {
+    getActiveEmbeddedRunSnapshotMock.mockReturnValue({
+      transcriptLeafId: "assistant-1",
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "seed" }],
+          timestamp: 1,
+        },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: "call-1",
+              name: "read",
+              arguments: { path: "README.md" },
+            },
+          ],
+          timestamp: 2,
+        },
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "done" },
+            {
+              type: "toolCall",
+              id: "call-2",
+              name: "write",
+              arguments: { path: "notes.txt", content: "hi" },
+            },
+          ],
+          timestamp: 3,
+        },
+      ],
+    });
+    mockDoneAnswer(MATH_ANSWER);
+
+    await runMathSideQuestion();
+
+    const [, context] = streamSimpleMock.mock.calls[0] ?? [];
+    const contextMessages =
+      (context as { messages?: Array<{ role?: string; content?: Array<{ type?: string }> }> })
+        .messages ?? [];
+
+    expect(contextMessages).toEqual([
+      expect.objectContaining({
+        role: "user",
+        content: [{ type: "text", text: "seed" }],
+      }),
+      expect.objectContaining({
+        role: "assistant",
+        content: [{ type: "text", text: "done" }],
+      }),
+      expect.objectContaining({ role: "user" }),
+    ]);
+    for (const message of contextMessages) {
+      expect(message.content?.some((block) => block.type === "toolCall")).not.toBe(true);
+    }
   });
 });

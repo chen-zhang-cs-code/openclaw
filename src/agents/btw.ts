@@ -2,6 +2,7 @@ import {
   streamSimple,
   type Api,
   type AssistantMessageEvent,
+  type ThinkingLevel as SimpleThinkingLevel,
   type Message,
   type Model,
 } from "@mariozechner/pi-ai";
@@ -21,6 +22,7 @@ import { ensureOpenClawModelsJson } from "./models-config.js";
 import { EmbeddedBlockChunker, type BlockReplyChunking } from "./pi-embedded-block-chunker.js";
 import { resolveModelWithRegistry } from "./pi-embedded-runner/model.js";
 import { getActiveEmbeddedRunSnapshot } from "./pi-embedded-runner/runs.js";
+import { mapThinkingLevel } from "./pi-embedded-runner/utils.js";
 import { discoverAuthStorage, discoverModels } from "./pi-model-discovery.js";
 import { stripToolResultDetails } from "./session-transcript-repair.js";
 
@@ -35,6 +37,8 @@ type SessionManagerLike = {
   resetLeaf?: () => void;
   buildSessionContext: () => { messages?: unknown[] };
 };
+
+type BtwContextMessage = Extract<Message, { role: "user" | "assistant" }>;
 
 function collectTextContent(content: Array<{ type?: string; text?: string }>): string {
   return content
@@ -83,16 +87,42 @@ function buildBtwQuestionPrompt(question: string, inFlightPrompt?: string): stri
 }
 
 function toSimpleContextMessages(messages: unknown[]): Message[] {
-  const contextMessages = messages.filter((message): message is Message => {
+  const contextMessages = messages.filter((message): message is BtwContextMessage => {
     if (!message || typeof message !== "object") {
       return false;
     }
     const role = (message as { role?: unknown }).role;
     return role === "user" || role === "assistant";
   });
-  return stripToolResultDetails(
+  const strippedMessages = stripToolResultDetails(
     contextMessages as Parameters<typeof stripToolResultDetails>[0],
-  ) as Message[];
+  ) as BtwContextMessage[];
+
+  return strippedMessages
+    .map((message) => {
+      if (message.role !== "assistant") {
+        return message;
+      }
+      const content = message.content.filter((part) => part.type !== "toolCall");
+      if (content.length === 0) {
+        return null;
+      }
+      if (content.length === message.content.length) {
+        return message;
+      }
+      return {
+        ...message,
+        content,
+      };
+    })
+    .filter((message): message is BtwContextMessage => message !== null);
+}
+
+function resolveSimpleThinkingLevel(level?: ThinkLevel): SimpleThinkingLevel | undefined {
+  if (!level || level === "off") {
+    return undefined;
+  }
+  return mapThinkingLevel(level) as SimpleThinkingLevel;
 }
 
 function resolveSessionTranscriptPath(params: {
@@ -255,7 +285,8 @@ export async function runBtwSideQuestion(
     profileId: authProfileId,
     agentDir: params.agentDir,
   });
-  const apiKey = requireApiKey(apiKeyInfo, model.provider);
+  const apiKey =
+    apiKeyInfo.mode === "aws-sdk" ? undefined : requireApiKey(apiKeyInfo, model.provider);
 
   const chunker =
     params.opts?.onBlockReply && params.blockReplyChunking
@@ -303,9 +334,7 @@ export async function runBtwSideQuestion(
     },
     {
       apiKey,
-      // BTW is intentionally a lightweight side question path. Keep provider
-      // reasoning off so we reliably receive answer text instead of thinking-only output.
-      reasoning: undefined,
+      reasoning: resolveSimpleThinkingLevel(params.resolvedThinkLevel),
       signal: params.opts?.abortSignal,
     },
   );
