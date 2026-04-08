@@ -14,6 +14,8 @@ import type { SecretInput } from "./types.secrets.js";
 import type { GroupToolPolicyBySenderConfig, GroupToolPolicyConfig } from "./types.tools.js";
 
 export type MSTeamsWebhookConfig = {
+  /** Local bind host for the webhook server. Default: 0.0.0.0. */
+  host?: string;
   /** Port for the webhook server. Default: 3978. */
   port?: number;
   /** Path for the messages endpoint. Default: /api/messages. */

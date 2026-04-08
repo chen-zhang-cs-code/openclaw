@@ -153,7 +153,7 @@ vi.mock("./runtime.js", () => ({
 
 import { monitorMSTeamsProvider } from "./monitor.js";
 
-function createConfig(port: number): OpenClawConfig {
+function createConfig(port: number, host?: string): OpenClawConfig {
   return {
     channels: {
       msteams: {
@@ -164,6 +164,7 @@ function createConfig(port: number): OpenClawConfig {
         webhook: {
           port,
           path: "/api/messages",
+          ...(host ? { host } : {}),
         },
       },
     },
@@ -229,6 +230,44 @@ describe("monitorMSTeamsProvider lifecycle", () => {
         pollStore: createStores().pollStore,
       }),
     ).rejects.toThrow(/EADDRINUSE/);
+  });
+
+  it("passes the default webhook host to the listener", async () => {
+    const abort = new AbortController();
+    const task = monitorMSTeamsProvider({
+      cfg: createConfig(3978),
+      runtime: createRuntime(),
+      abortSignal: abort.signal,
+      conversationStore: createStores().conversationStore,
+      pollStore: createStores().pollStore,
+    });
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    const app = expressControl.apps.at(-1);
+    expect(app?.listen).toHaveBeenCalledWith(3978, "0.0.0.0");
+
+    abort.abort();
+    await task;
+  });
+
+  it("passes configured webhook host to the listener", async () => {
+    const abort = new AbortController();
+    const task = monitorMSTeamsProvider({
+      cfg: createConfig(3978, "127.0.0.1"),
+      runtime: createRuntime(),
+      abortSignal: abort.signal,
+      conversationStore: createStores().conversationStore,
+      pollStore: createStores().pollStore,
+    });
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    const app = expressControl.apps.at(-1);
+    expect(app?.listen).toHaveBeenCalledWith(3978, "127.0.0.1");
+
+    abort.abort();
+    await task;
   });
 
   it("runs JWT validation before JSON body parsing", async () => {

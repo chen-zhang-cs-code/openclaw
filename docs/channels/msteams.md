@@ -470,6 +470,7 @@ Key settings (see `/gateway/configuration` for shared channel patterns):
 
 - `channels.msteams.enabled`: enable/disable the channel.
 - `channels.msteams.appId`, `channels.msteams.appPassword`, `channels.msteams.tenantId`: bot credentials.
+- `channels.msteams.webhook.host`: local bind host (default `0.0.0.0`; use `127.0.0.1` behind a local tunnel or reverse proxy).
 - `channels.msteams.webhook.port` (default `3978`)
 - `channels.msteams.webhook.path` (default `/api/messages`)
 - `channels.msteams.dmPolicy`: `pairing | allowlist | open | disabled` (default: pairing)

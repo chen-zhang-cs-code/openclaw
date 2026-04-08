@@ -28,4 +28,15 @@ describe("config msteams", () => {
     });
     expect(res.success).toBe(false);
   });
+
+  it("accepts webhook host", () => {
+    const res = MSTeamsConfigSchema.safeParse({
+      webhook: {
+        host: "127.0.0.1",
+        port: 3978,
+        path: "/api/messages",
+      },
+    });
+    expect(res.success).toBe(true);
+  });
 });
