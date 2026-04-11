@@ -2776,7 +2776,7 @@ module.exports = {
     ).toBe("disabled");
   });
 
-  it.each([
+  const setupEntryScenarios = [
     {
       name: "uses package setupEntry for selected setup-only channel loads",
       fixture: {
@@ -2839,7 +2839,7 @@ module.exports = {
         fullBlurb: "full entry should not run while unconfigured",
         setupBlurb: "setup runtime bundled",
         configured: false,
-        setupEntryShape: "bundled" as const,
+        setupEntryShape: "bundled",
       },
       load: ({ pluginDir }: { pluginDir: string }) =>
         loadOpenClawPlugins({
@@ -2886,15 +2886,27 @@ module.exports = {
       expectSetupLoaded: false,
       expectedChannels: 1,
     },
-  ])("$name", ({ fixture, load, expectFullLoaded, expectSetupLoaded, expectedChannels }) => {
-    const built = createSetupEntryChannelPluginFixture(fixture);
-    const registry = load({ pluginDir: built.pluginDir });
+  ] satisfies ReadonlyArray<{
+    name: string;
+    fixture: Parameters<typeof createSetupEntryChannelPluginFixture>[0];
+    load: ({ pluginDir }: { pluginDir: string }) => ReturnType<typeof loadOpenClawPlugins>;
+    expectFullLoaded: boolean;
+    expectSetupLoaded: boolean;
+    expectedChannels: number;
+  }>;
 
-    expect(fs.existsSync(built.fullMarker)).toBe(expectFullLoaded);
-    expect(fs.existsSync(built.setupMarker)).toBe(expectSetupLoaded);
-    expect(registry.channelSetups).toHaveLength(1);
-    expect(registry.channels).toHaveLength(expectedChannels);
-  });
+  it.each(setupEntryScenarios)(
+    "$name",
+    ({ fixture, load, expectFullLoaded, expectSetupLoaded, expectedChannels }) => {
+      const built = createSetupEntryChannelPluginFixture(fixture);
+      const registry = load({ pluginDir: built.pluginDir });
+
+      expect(fs.existsSync(built.fullMarker)).toBe(expectFullLoaded);
+      expect(fs.existsSync(built.setupMarker)).toBe(expectSetupLoaded);
+      expect(registry.channelSetups).toHaveLength(1);
+      expect(registry.channels).toHaveLength(expectedChannels);
+    },
+  );
 
   it("surfaces bundled setupEntry loadSetupPlugin failures", () => {
     const built = createSetupEntryChannelPluginFixture({
