@@ -286,6 +286,42 @@ describe("slackPlugin actions", () => {
       undefined,
     );
   });
+
+  it("forwards media access context through the custom invoke path", async () => {
+    handleSlackActionMock.mockResolvedValueOnce({ ok: true });
+    const handleAction = requireSlackHandleAction();
+    const mediaReadFile = vi.fn();
+
+    await handleAction({
+      action: "upload-file",
+      channel: "slack",
+      accountId: "default",
+      cfg: {},
+      params: {
+        to: "C123",
+        filePath: "/tmp/workspace/render.wav",
+      },
+      toolContext: {
+        agentId: "agent.test",
+      },
+      mediaLocalRoots: ["/tmp/workspace"],
+      mediaReadFile,
+    });
+
+    expect(handleSlackActionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "uploadFile",
+        to: "C123",
+        filePath: "/tmp/workspace/render.wav",
+      }),
+      {},
+      expect.objectContaining({
+        agentId: "agent.test",
+        mediaLocalRoots: ["/tmp/workspace"],
+        mediaReadFile,
+      }),
+    );
+  });
 });
 
 describe("slackPlugin status", () => {
