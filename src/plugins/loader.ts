@@ -634,13 +634,26 @@ function resolveSetupChannelRegistration(moduleExport: unknown): {
   }
   const setup = resolved as {
     plugin?: unknown;
+    loadSetupPlugin?: (() => unknown) | undefined;
   };
-  if (!setup.plugin || typeof setup.plugin !== "object") {
-    return {};
+  if (setup.plugin && typeof setup.plugin === "object") {
+    return {
+      plugin: setup.plugin as ChannelPlugin,
+    };
   }
-  return {
-    plugin: setup.plugin as ChannelPlugin,
-  };
+  if (typeof setup.loadSetupPlugin === "function") {
+    try {
+      const loaded = setup.loadSetupPlugin();
+      if (loaded && typeof loaded === "object") {
+        return {
+          plugin: loaded as ChannelPlugin,
+        };
+      }
+    } catch {
+      return {};
+    }
+  }
+  return {};
 }
 
 function shouldLoadChannelPluginInSetupRuntime(params: {

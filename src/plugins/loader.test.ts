@@ -513,6 +513,7 @@ function createSetupEntryChannelPluginFixture(params: {
   fullBlurb: string;
   setupBlurb: string;
   configured: boolean;
+  setupEntryShape?: "direct" | "bundled";
   startupDeferConfiguredChannelFullLoadUntilAfterListen?: boolean;
 }) {
   useNoBundledPlugins();
@@ -523,6 +524,31 @@ function createSetupEntryChannelPluginFixture(params: {
   const resolveAccount = params.configured
     ? '({ accountId: "default", token: "configured" })'
     : '({ accountId: "default" })';
+  const setupPluginLiteral = `{
+    id: ${JSON.stringify(params.id)},
+    meta: {
+      id: ${JSON.stringify(params.id)},
+      label: ${JSON.stringify(params.label)},
+      selectionLabel: ${JSON.stringify(params.label)},
+      docsPath: ${JSON.stringify(`/channels/${params.id}`)},
+      blurb: ${JSON.stringify(params.setupBlurb)},
+    },
+    capabilities: { chatTypes: ["direct"] },
+    config: {
+      listAccountIds: () => ${listAccountIds},
+      resolveAccount: () => ${resolveAccount},
+    },
+    outbound: { deliveryMode: "direct" },
+  }`;
+  const setupEntryExport =
+    params.setupEntryShape === "bundled"
+      ? `{
+  kind: "bundled-channel-setup-entry",
+  loadSetupPlugin: () => (${setupPluginLiteral}),
+}`
+      : `{
+  plugin: ${setupPluginLiteral},
+}`;
 
   fs.writeFileSync(
     path.join(pluginDir, "package.json"),
@@ -590,24 +616,7 @@ module.exports = {
   fs.writeFileSync(
     path.join(pluginDir, "setup-entry.cjs"),
     `require("node:fs").writeFileSync(${JSON.stringify(setupMarker)}, "loaded", "utf-8");
-module.exports = {
-  plugin: {
-    id: ${JSON.stringify(params.id)},
-    meta: {
-      id: ${JSON.stringify(params.id)},
-      label: ${JSON.stringify(params.label)},
-      selectionLabel: ${JSON.stringify(params.label)},
-      docsPath: ${JSON.stringify(`/channels/${params.id}`)},
-      blurb: ${JSON.stringify(params.setupBlurb)},
-    },
-    capabilities: { chatTypes: ["direct"] },
-    config: {
-      listAccountIds: () => ${listAccountIds},
-      resolveAccount: () => ${resolveAccount},
-    },
-    outbound: { deliveryMode: "direct" },
-  },
-};`,
+module.exports = ${setupEntryExport};`,
     "utf-8",
   );
 
@@ -2807,6 +2816,31 @@ module.exports = {
             plugins: {
               load: { paths: [pluginDir] },
               allow: ["setup-runtime-test"],
+            },
+          },
+        }),
+      expectFullLoaded: false,
+      expectSetupLoaded: true,
+      expectedChannels: 1,
+    },
+    {
+      name: "uses bundled setupEntry loadSetupPlugin for enabled but unconfigured channel loads",
+      fixture: {
+        id: "setup-runtime-bundled-test",
+        label: "Setup Runtime Bundled Test",
+        packageName: "@openclaw/setup-runtime-bundled-test",
+        fullBlurb: "full entry should not run while unconfigured",
+        setupBlurb: "setup runtime bundled",
+        configured: false,
+        setupEntryShape: "bundled",
+      },
+      load: ({ pluginDir }: { pluginDir: string }) =>
+        loadOpenClawPlugins({
+          cache: false,
+          config: {
+            plugins: {
+              load: { paths: [pluginDir] },
+              allow: ["setup-runtime-bundled-test"],
             },
           },
         }),
