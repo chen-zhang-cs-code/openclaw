@@ -107,6 +107,7 @@ export async function buildTelegramInboundContextPayload(params: {
   options?: TelegramMessageContextOptions;
   dmAllowFrom?: Array<string | number>;
   effectiveGroupAllow?: NormalizedAllowFrom;
+  topicName?: string;
   sessionRuntime?: TelegramMessageContextSessionRuntimeOverrides;
 }): Promise<{
   ctxPayload: FinalizedTelegramInboundContext;
@@ -143,6 +144,7 @@ export async function buildTelegramInboundContextPayload(params: {
     options,
     dmAllowFrom,
     effectiveGroupAllow,
+    topicName,
     sessionRuntime: sessionRuntimeOverride,
   } = params;
   const replyTarget = describeReplyTarget(msg);
@@ -355,6 +357,7 @@ export async function buildTelegramInboundContextPayload(params: {
     CommandSource: options?.commandSource,
     MessageThreadId: threadSpec.id,
     IsForum: isForum,
+    TopicName: isForum && topicName ? topicName : undefined,
     OriginatingChannel: "telegram" as const,
     OriginatingTo: `telegram:${chatId}`,
   });
