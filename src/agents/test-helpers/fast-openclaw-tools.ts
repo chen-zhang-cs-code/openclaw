@@ -44,3 +44,12 @@ vi.mock("../openclaw-tools.js", () => ({
     setDepsForTest: () => {},
   },
 }));
+
+vi.mock("../plugins/hook-runner-global.js", () => ({
+  getGlobalHookRunner: () => null,
+  getGlobalPluginRegistry: () => null,
+  hasGlobalHooks: () => false,
+  initializeGlobalHookRunner: () => {},
+  resetGlobalHookRunner: () => {},
+  runGlobalGatewayStopSafely: async () => {},
+}));
