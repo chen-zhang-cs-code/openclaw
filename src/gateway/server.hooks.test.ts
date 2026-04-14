@@ -19,6 +19,7 @@ installGatewayTestHooks({ scope: "suite" });
 
 const resolveMainKey = () => resolveMainSessionKeyFromConfig();
 const HOOK_TOKEN = "hook-secret";
+const HOOK_ROUTING_WAIT_TIMEOUT_MS = 10_000;
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -116,7 +117,10 @@ async function expectHookAgentSessionRouting(params: {
     sessionKey: params.requestSessionKey,
   });
   expect(resAgent.status).toBe(200);
-  await waitForSystemEvent();
+  await vi.waitFor(() => {
+    expect(cronIsolatedRun).toHaveBeenCalledTimes(1);
+  }, HOOK_ROUTING_WAIT_TIMEOUT_MS);
+  await waitForSystemEvent(HOOK_ROUTING_WAIT_TIMEOUT_MS);
 
   const routedCall = (cronIsolatedRun.mock.calls[0] as unknown[] | undefined)?.[0] as
     | { sessionKey?: string; job?: { agentId?: string } }
