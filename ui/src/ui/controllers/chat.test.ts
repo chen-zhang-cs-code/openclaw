@@ -475,6 +475,87 @@ describe("handleChatEvent", () => {
     expect(state.chatMessages).toEqual([]);
   });
 
+  it("appends a visible failure summary when a chat run errors without output", () => {
+    const existingMessage = {
+      role: "user",
+      content: [{ type: "text", text: "Fetch the page" }],
+      timestamp: 1,
+    };
+    const state = createState({
+      sessionKey: "main",
+      chatRunId: "run-1",
+      chatStream: "",
+      chatStreamStartedAt: 100,
+      chatMessages: [existingMessage],
+    });
+    const payload: ChatEventPayload = {
+      runId: "run-1",
+      sessionKey: "main",
+      state: "error",
+      errorMessage: "browser request failed",
+    };
+
+    expect(handleChatEvent(state, payload)).toBe("error");
+    expect(state.chatRunId).toBe(null);
+    expect(state.chatStream).toBe(null);
+    expect(state.chatStreamStartedAt).toBe(null);
+    expect(state.lastError).toBe("browser request failed");
+    expect(state.chatMessages).toHaveLength(2);
+    expect(state.chatMessages[0]).toEqual(existingMessage);
+    expect(state.chatMessages[1]).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "Run failed: browser request failed" }],
+    });
+  });
+
+  it("preserves streamed text before appending the terminal error summary", () => {
+    const state = createState({
+      sessionKey: "main",
+      chatRunId: "run-1",
+      chatStream: "I checked the first source.",
+      chatStreamStartedAt: 100,
+    });
+    const payload: ChatEventPayload = {
+      runId: "run-1",
+      sessionKey: "main",
+      state: "error",
+      errorMessage: "tool execution failed",
+    };
+
+    expect(handleChatEvent(state, payload)).toBe("error");
+    expect(state.chatMessages).toHaveLength(2);
+    expect(state.chatMessages[0]).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "I checked the first source." }],
+    });
+    expect(state.chatMessages[1]).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "Run failed: tool execution failed" }],
+    });
+  });
+
+  it("does not preserve NO_REPLY stream text before an error summary", () => {
+    const state = createState({
+      sessionKey: "main",
+      chatRunId: "run-1",
+      chatStream: "NO_REPLY",
+      chatStreamStartedAt: 100,
+    });
+    const payload: ChatEventPayload = {
+      runId: "run-1",
+      sessionKey: "main",
+      state: "error",
+    };
+
+    expect(handleChatEvent(state, payload)).toBe("error");
+    expect(state.lastError).toBe("chat error");
+    expect(state.chatMessages).toHaveLength(1);
+    expect(state.chatMessages[0]).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "Run failed: chat error" }],
+    });
+  });
+
   it("keeps user messages containing NO_REPLY text", () => {
     const state = createState({
       sessionKey: "main",

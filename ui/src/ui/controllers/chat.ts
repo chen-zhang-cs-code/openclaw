@@ -291,6 +291,29 @@ function normalizeFinalAssistantMessage(message: unknown): Record<string, unknow
   });
 }
 
+function appendAssistantTextMessage(state: ChatState, text: string): void {
+  state.chatMessages = [
+    ...state.chatMessages,
+    {
+      role: "assistant",
+      content: [{ type: "text", text }],
+      timestamp: Date.now(),
+    },
+  ];
+}
+
+function appendVisibleStreamedText(state: ChatState): void {
+  const streamedText = state.chatStream ?? "";
+  if (!streamedText.trim() || isSilentReplyStream(streamedText)) {
+    return;
+  }
+  appendAssistantTextMessage(state, streamedText);
+}
+
+function appendChatErrorSummary(state: ChatState, errorMessage: string): void {
+  appendAssistantTextMessage(state, `Run failed: ${errorMessage}`);
+}
+
 export async function sendChatMessage(
   state: ChatState,
   message: string,
@@ -433,15 +456,8 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
     const finalMessage = normalizeFinalAssistantMessage(payload.message);
     if (finalMessage && !isAssistantSilentReply(finalMessage)) {
       state.chatMessages = [...state.chatMessages, finalMessage];
-    } else if (state.chatStream?.trim() && !isSilentReplyStream(state.chatStream)) {
-      state.chatMessages = [
-        ...state.chatMessages,
-        {
-          role: "assistant",
-          content: [{ type: "text", text: state.chatStream }],
-          timestamp: Date.now(),
-        },
-      ];
+    } else {
+      appendVisibleStreamedText(state);
     }
     state.chatStream = null;
     state.chatRunId = null;
@@ -451,26 +467,19 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
     if (normalizedMessage && !isAssistantSilentReply(normalizedMessage)) {
       state.chatMessages = [...state.chatMessages, normalizedMessage];
     } else {
-      const streamedText = state.chatStream ?? "";
-      if (streamedText.trim() && !isSilentReplyStream(streamedText)) {
-        state.chatMessages = [
-          ...state.chatMessages,
-          {
-            role: "assistant",
-            content: [{ type: "text", text: streamedText }],
-            timestamp: Date.now(),
-          },
-        ];
-      }
+      appendVisibleStreamedText(state);
     }
     state.chatStream = null;
     state.chatRunId = null;
     state.chatStreamStartedAt = null;
   } else if (payload.state === "error") {
+    const errorMessage = payload.errorMessage ?? "chat error";
+    appendVisibleStreamedText(state);
+    appendChatErrorSummary(state, errorMessage);
     state.chatStream = null;
     state.chatRunId = null;
     state.chatStreamStartedAt = null;
-    state.lastError = payload.errorMessage ?? "chat error";
+    state.lastError = errorMessage;
   }
   return payload.state;
 }
