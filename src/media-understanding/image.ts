@@ -6,7 +6,7 @@ import {
   requireApiKey,
   resolveApiKeyForProvider,
 } from "../agents/model-auth.js";
-import { normalizeModelRef } from "../agents/model-selection.js";
+import { normalizeModelRef, parseModelRef } from "../agents/model-selection.js";
 import { ensureOpenClawModelsJson } from "../agents/models-config.js";
 import { coerceImageAssistantText } from "../agents/tools/image-tool.helpers.js";
 import type {
@@ -36,6 +36,22 @@ function resolveImageToolMaxTokens(modelMaxTokens: number | undefined, requested
   return Math.min(requestedMaxTokens, modelMaxTokens);
 }
 
+function resolveImageRuntimeLookupRefs(params: {
+  provider: string;
+  model: string;
+}): Array<{ provider: string; model: string }> {
+  const normalizedRef = normalizeModelRef(params.provider, params.model);
+  const parsedRef = parseModelRef(params.model, normalizedRef.provider);
+  if (
+    parsedRef &&
+    parsedRef.provider === normalizedRef.provider &&
+    parsedRef.model !== normalizedRef.model
+  ) {
+    return [normalizedRef, parsedRef];
+  }
+  return [normalizedRef];
+}
+
 async function resolveImageRuntime(params: {
   cfg: ImageDescriptionRequest["cfg"];
   agentDir: string;
@@ -48,8 +64,19 @@ async function resolveImageRuntime(params: {
   const { discoverAuthStorage, discoverModels } = await loadPiModelDiscoveryRuntime();
   const authStorage = discoverAuthStorage(params.agentDir);
   const modelRegistry = discoverModels(authStorage, params.agentDir);
-  const resolvedRef = normalizeModelRef(params.provider, params.model);
-  const model = modelRegistry.find(resolvedRef.provider, resolvedRef.model) as Model<Api> | null;
+  const lookupRefs = resolveImageRuntimeLookupRefs({
+    provider: params.provider,
+    model: params.model,
+  });
+  let resolvedRef = lookupRefs[0];
+  let model: Model<Api> | null = null;
+  for (const lookupRef of lookupRefs) {
+    model = modelRegistry.find(lookupRef.provider, lookupRef.model) as Model<Api> | null;
+    resolvedRef = lookupRef;
+    if (model) {
+      break;
+    }
+  }
   if (!model) {
     throw new Error(`Unknown model: ${resolvedRef.provider}/${resolvedRef.model}`);
   }
