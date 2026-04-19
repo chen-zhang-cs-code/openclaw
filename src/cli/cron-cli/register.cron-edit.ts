@@ -12,7 +12,12 @@ import {
   applyExistingCronSchedulePatch,
   resolveCronEditScheduleRequest,
 } from "./schedule-options.js";
-import { getCronChannelOptions, parseDurationMs, warnIfCronSchedulerDisabled } from "./shared.js";
+import {
+  getCronChannelOptions,
+  parseCronToolsAllow,
+  parseDurationMs,
+  warnIfCronSchedulerDisabled,
+} from "./shared.js";
 
 const assignIf = (
   target: Record<string, unknown>,
@@ -175,6 +180,7 @@ export function registerCronEditCommand(cron: Command) {
           const hasSystemEventPatch = typeof opts.systemEvent === "string";
           const model = normalizeOptionalString(opts.model);
           const thinking = normalizeOptionalString(opts.thinking);
+          const toolsAllow = parseCronToolsAllow(opts.tools);
           const timeoutSeconds = opts.timeoutSeconds
             ? Number.parseInt(String(opts.timeoutSeconds), 10)
             : undefined;
@@ -190,6 +196,7 @@ export function registerCronEditCommand(cron: Command) {
             hasTimeoutSeconds ||
             typeof opts.lightContext === "boolean" ||
             typeof opts.tools === "string" ||
+            Array.isArray(opts.tools) ||
             opts.clearTools ||
             hasDeliveryModeFlag ||
             hasDeliveryTarget ||
@@ -217,11 +224,8 @@ export function registerCronEditCommand(cron: Command) {
             );
             if (opts.clearTools) {
               payload.toolsAllow = null;
-            } else if (typeof opts.tools === "string" && opts.tools.trim()) {
-              payload.toolsAllow = opts.tools
-                .split(",")
-                .map((t: string) => t.trim())
-                .filter(Boolean);
+            } else if (toolsAllow) {
+              payload.toolsAllow = toolsAllow;
             }
             patch.payload = payload;
           }

@@ -13,6 +13,7 @@ import { resolveCronCreateSchedule } from "./schedule-options.js";
 import {
   getCronChannelOptions,
   handleCronCliError,
+  parseCronToolsAllow,
   printCronJson,
   printCronList,
   warnIfCronSchedulerDisabled,
@@ -150,13 +151,7 @@ export function registerCronAddCommand(cron: Command) {
               timeoutSeconds:
                 timeoutSeconds && Number.isFinite(timeoutSeconds) ? timeoutSeconds : undefined,
               lightContext: opts.lightContext === true ? true : undefined,
-              toolsAllow:
-                typeof opts.tools === "string" && opts.tools.trim()
-                  ? opts.tools
-                      .split(",")
-                      .map((t: string) => normalizeOptionalString(t))
-                      .filter((t): t is string => Boolean(t))
-                  : undefined,
+              toolsAllow: parseCronToolsAllow(opts.tools),
             };
           })();
 
